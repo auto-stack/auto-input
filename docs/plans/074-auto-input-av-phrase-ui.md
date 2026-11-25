@@ -36,7 +36,7 @@ GUI 是独立管理进程。AutoUI/AGE 的组件和宿主能力是本包的实�
 
 ## 3. 技术栈
 
-新版 ACE AV、AutoUI 原生桌面入口及既有组件、072 管理模块与 helper、Inno Setup 6。实现主面在 auto-os 的 `manager/`，使用拟定工作树 `D:/autostack/auto-input`、在 `main` 上开发，执行与复审顺序复用。
+新版 ACE AV、AutoUI 原生桌面入口及既有组件、072 管理模块与 helper、Inno Setup 6。实现主面在 auto-input 的 `manager/`，使用独立检出 `D:/autostack/auto-input`、在 `main` 上开发，执行与复审顺序复用。
 
 按环境变量/兄弟检出/主检出顺序解析语言和 UI 仓。若发现框架能力缺口，在 auto-ui 或 auto-lang 的对应 owner 留最小复现和关闭条件，再接续依赖任务。本计划自身消费已交接口，框架实质修改沿所属仓计划规约办理。
 
@@ -48,7 +48,7 @@ GUI 是独立管理进程。AutoUI/AGE 的组件和宿主能力是本包的实�
 |---|---|
 | [072 草案](archived/072-autoime-ace-phrase-manager.md) | 约定 list/add/remove/import/export/deploy、共享 Auto 逻辑和事务恢复，是待核实的上游交付合同。 |
 | [设计 05](../design/05-auto-input-windows.md) | 已将图形词组管理列为后续扩展。 |
-| [AutoUI 104 归档](https://github.com/auto-stack/auto-ui/blob/main/docs/plans/archived/104-autoui-u02-pages-and-forms-av-vue.md) | 有 AV 页面、表单和事件的交付证据；具体应用中的动态数据与服务调用需实证。 |
+| [AutoUI 104 归档](https://github.com/auto-stack/auto-ui/blob/master/docs/plans/archived/104-autoui-u02-pages-and-forms-av-vue.md) | 有 AV 页面、表单和事件的交付证据；具体应用中的动态数据与服务调用需实证。 |
 | `auto-ui/crates/auto-ui-runtime/examples/ace_node_desktop_window.rs` | 已有 --source/--package/--entry 和 NodeDesktopBridge::load_package 入口，供 T-01 核对。 |
 | `auto-ui/crates/auto-ui-runtime/src/ui/ace_node_desktop.rs` 及其 widgets 模块 | 复用既有宿主/组件；示例窗口或平铺显示成功不能替代本应用完整控件行为。 |
 

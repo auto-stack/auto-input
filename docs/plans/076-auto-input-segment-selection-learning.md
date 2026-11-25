@@ -41,7 +41,7 @@ touched_goals: []
 
 ## 3. 技术栈
 
-现有 librime、Rime YAML、C++17 TSF/Win32、已有 probe/fixture、Inno Setup。仓库 auto-input；拟实施树 `D:/autostack/auto-input`，在 `main` 上开发，work/review 顺序复用同一树。证据原件放 `D:/autostack/plan-artifacts/plan-076/`，必要结论写回本计划。
+现有 librime、Rime YAML、C++17 TSF/Win32、已有 probe/fixture、Inno Setup。仓库 auto-input，使用独立检出 `D:/autostack/auto-input`，在 `main` 上开发，work/review 顺序复用同一树。证据原件放 `D:/autostack/plan-artifacts/plan-076/`，必要结论写回本计划。
 
 硬依赖为 071 的独立输入法与安装基础。073 与本包的 KeyRouter、schema、probe 和安装文件有重叠，实际代码写入及合入串行协调，建议先落地 073 的 Shift 修复，再做本包按键集成；T-01 可先行，不要求 073 的全部质量任务先结束。最终交付需包含对应 Shift 修复，竖线绑定不得依赖尚有缺陷的符号映射。072/074 是显式短语管理关联项，不是本包执行前置。
 
@@ -196,7 +196,7 @@ T-01 在本节补齐：锁定引擎身份、原生导航/候选范围可用性�
 
 stage: new | plan_id: PLAN-076 | plan_revision: 1 | outcome: pass | next: work/T-01（实施环境就绪后） | tasks: T-01–08 | acceptance: AC-01–07 | implementation/tests: NOT_RUN
 
-文档验证：首次路径检查发现根层 `README.md` 不存在，已更正为实际 `windows/README.md` 并补充 installer 入口。修订后 41 项结构、任务数/唯一 ID、Markdown 链接、源文件路径及编号检查通过，耗时 0.283 s；`.next-id` 的 `git diff --check` 通过。产品测试未运行，没有新增已执行的产品用例。
+文档验证：迁移前首次路径检查发现 AutoOS 实验目录的 `experimental/autoime/README.md` 不存在，已更正为实际 `windows/README.md` 并补充 installer 入口。修订后 41 项结构、任务数/唯一 ID、Markdown 链接、源文件路径及编号检查通过，耗时 0.283 s；`.next-id` 的 `git diff --check` 通过。产品测试未运行，没有新增已执行的产品用例。
 
 保存/提交：076、073 r3 与 `.next-id=077` 已写入主检出。按取号纪律尝试只暂存这三份文件，`git add -- ...` 返回 exit 1：无法创建 `.git/index.lock`（Permission denied），因此未提交。没有重试、改动其他暂存内容或操作已有工作树。
 

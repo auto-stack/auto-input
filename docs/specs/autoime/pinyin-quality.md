@@ -187,7 +187,7 @@ librime 1.13.1 的部署器（源码核对：`lever/deployment_tasks.cc` 的
 - 升级/回退与性能（`ime/tests/run-t04.ps1`，32 检查全过）：首次部署
   3.99 s（`autoime_deploy --latency 20`），就绪后按键到候选中位数 313 µs、
   P95 327 µs；损坏升级回滚到上一可用版本、用户短语与学习库在升级中保留、
-  双宿主并发冷启均通过。安装包 `AutoInput-Setup-x64.exe` 9,317,931 字节，
+  双宿主并发冷启均通过。当时的安装包 `AutoIME-Setup-x64.exe` 9,317,931 字节，
   SHA-256 `AAEC0E0B…D021`（交付提交 `ca3acbc` closeout 重建；功能资源与
   `f379f58` 构建相同，差异仅为随包 `resources/README.md` 文本），staged
   `resources` 含新增 `autoime_words.*`。

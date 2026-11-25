@@ -59,7 +59,7 @@ BSD-3-Clause；随包共享数据取自小狼毫（GPL-3.0）发行包原样再�
 
 包版本 0.3.2：payload 增加 `autoime_engine.exe`（`restartreplace`，权限不足时
 下次空闲替换）、个人英文术语模板与依赖 schema；`uninstall.cmd` 先停引擎再清理
-引擎/管理器文件。`build.cmd` 产出 `dist\AutoInput-Setup-x64.exe`（9,418,814 字节）
+引擎/管理器文件。`build.cmd` 当时产出 `dist\AutoIME-Setup-x64.exe`（9,418,814 字节）
 
 `pwsh -NoProfile -File run-t07.ps1` 为无需管理员权限的包验收：包哈希、payload
 清单、resources 与仓库逐文件一致、锁定清单哈希、模拟安装目录的全新部署与候选

@@ -9,7 +9,7 @@
 
 | 文件 | 作用 | 字节 | SHA-256 |
 |---|---|---|---|
-| `autoime_pinyin.schema.yaml` | 默认方案 `autoime_pinyin`（全拼/简拼/全简混输、术语、常用词修正、中英混输、简体输出） | 5839 | `744ED9BABF62D2DFF72E68C8075C308926FBD514C2FCC98BBB13E17255704D94` |
+| `autoime_pinyin.schema.yaml` | 默认方案 `autoime_pinyin`（全拼/简拼/全简混输、术语、常用词修正、中英混输、简体输出） | 5841 | `4A62060376F6274C913E156EDE01E74F931129158B16ECB19ACC91A3C90D1037` |
 | `autoime_terms.dict.yaml` | 项目术语词表（原创条目，逐字拼音码） | 775 | `BB08D34D11E31F87ECBB7D2E5FE235D576C72D01F1149289840A08AC506154DC` |
 | `autoime_terms.schema.yaml` | 术语表部署入口（依赖方案，不在切换器展示；含拼音代数） | 1412 | `38CFA81B07D9D166D08C78E3357C38555037736654BBECF24B52337EA303D62E` |
 | `autoime_words.dict.yaml` | 共享自然拼音常用词修正（如「是的」；标准读音+权重，非短码） | 1091 | `9CBC93749591567DF778B3DC9C2FFDB5179CD8AA9D51CD96662BED397C831C86` |

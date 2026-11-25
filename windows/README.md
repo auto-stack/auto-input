@@ -1,6 +1,6 @@
 # AutoInput Windows x64（PLAN-069 / PLAN-070 / PLAN-071 / PLAN-072）
 
-AutoIME 的 Windows x64 离线拼音输入法：TSF 文本服务 + librime 引擎 + 原生
+AutoInput 的 Windows x64 离线拼音输入法：TSF 文本服务 + librime 引擎 + 原生
 Win32 候选窗。PLAN-069 交付了记事本上屏原型（代码 `94f1101`）；PLAN-070
 在其上交付日常试用版（按键/编辑/方案/部署），行为合同见
 [Design 05](../docs/design/05-auto-input-windows.md)。PLAN-071 交付
@@ -33,6 +33,8 @@ scripts/       安装/卸载脚本（UAC；安装时预部署资源）
 
 ## 构建
 
+从 `windows/` 执行。
+
 ```cmd
 cd ime
 build.cmd          :: build\autoime_ime.dll + verify_registered.exe
@@ -40,33 +42,35 @@ build.cmd          :: build\autoime_ime.dll + verify_registered.exe
                    :: + autoime_engine.exe（PLAN-078 T-02 每用户引擎所有者）
 cd ..\probe
 build.cmd          :: build\rime_probe.exe + build\rime_shared_probe.exe
-cd ..\manager
+cd ..\..\manager
 pwsh -NoProfile -File scripts\prepare.ps1   :: bin\autoime-config.exe + identity（AV 启动器）
 ```
 
 ## 自动化验证
 
+从 `windows/` 执行。
+
 ```cmd
 ime\test.cmd                      :: 先跑 ime\build.cmd；此后仅运行（21 用例/
                                   :: 220 检查，约 3.7s，含真实引擎符号上屏）
 probe\build\rime_probe.exe --schema autoime_pinyin ^
-    --resources-dir ..\..\shared\resources
+    --resources-dir ..\shared\resources
                                   :: 方案/候选套件（12 用例，含 t11 部分提交/
                                   :: t12 学习持久化，~6s）
 probe\build\rime_probe.exe --schema autoime_pinyin ^
-    --resources-dir ..\..\shared\resources ^
-    --cases ..\..\shared\tests\cases.json
+    --resources-dir ..\shared\resources ^
+    --cases ..\shared\tests\cases.json
                                   :: 共享用例回放（PLAN-071 T-01：空白用户数据，
                                   :: 逐例排名与首选/前五命中率，只读不选词）
 probe\build\rime_probe.exe --schema autoime_pinyin ^
-    --resources-dir ..\..\shared\resources ^
-    --cases ..\..\shared\tests\pinyin-quality.json
+    --resources-dir ..\shared\resources ^
+    --cases ..\shared\tests\pinyin-quality.json
                                   :: 拼音召回质量语料（PLAN-073 T-01：9 强制 +
                                   :: 36 观察 + 6 控制；scan=true 记录整表名次，
                                   :: whole-list=0 表示未召回）
 probe\build\rime_probe.exe --schema autoime_pinyin ^
-    --resources-dir ..\..\shared\resources ^
-    --cases ..\..\shared\tests\en-admission.json
+    --resources-dir ..\shared\resources ^
+    --cases ..\shared\tests\en-admission.json
                                   :: 英文别名准入语料（PLAN-078 T-01/T-05：20 例；
                                   :: expect_absent 断言整表缺席，大写键按生产
                                   :: KeyRouter 的大写 keysym + Shift mask 回放）
@@ -79,10 +83,10 @@ pwsh -NoProfile -File ime\tests\host-acceptance.ps1
                                   :: 用隔离空用户目录，需已安装本构建且桌面可交互
 pwsh -NoProfile -File ..\manager\scripts\test.ps1
                                   :: 短语/CLI 用例（PLAN-072：26 例，含真实部署事务）
-pwsh -NoProfile -File ..\manager\tests\txn.ps1 -Exe ime\build\autoime_deploy.exe -Resources shared\resources -ManagerExe manager\bin\autoime-config.exe -Probe probe\build\rime_probe.exe -BaselineCases shared\tests\cases.json
+pwsh -NoProfile -File ..\manager\tests\txn.ps1 -Exe ime\build\autoime_deploy.exe -Resources ..\shared\resources -ManagerExe ..\manager\bin\autoime-config.exe -Probe probe\build\rime_probe.exe -BaselineCases ..\shared\tests\cases.json
                                   :: 短语事务集成套件（18 例：冲突/忙/崩溃恢复/校验/probe）
 probe\build\rime_shared_probe.exe --engine ime\build\autoime_engine.exe ^
-    --self probe\build\rime_shared_probe.exe --resources-dir ..\..\shared\resources
+    --self probe\build\rime_shared_probe.exe --resources-dir ..\shared\resources
                                   :: 共享引擎双进程用例（PLAN-078 T-02：17 项，
                                   :: 跨进程学习/隔离/恢复/单所有者/延迟；spawn 真实
                                   :: 引擎与子客户端，约 5–7 s，含首次部署）

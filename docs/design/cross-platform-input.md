@@ -2,9 +2,9 @@
 
 本页保留 AutoLang 的原始跨平台设计，Windows 交付和后续安排见[产品路线](../ROADMAP.md)。
 
-> 2026-10-21 版本范围更新：按[月度滚动规划](https://github.com/auto-stack/auto-lang/blob/main/docs/roadmap.md)，v0.6 仅保留工程重构、ACE、AutoGraphics/Forge 雏形与 Linux 四条主线。本文下方旧 v0.6/v0.7 版次和日历按历史排期读取；其余目标进入[远期 TODO](https://github.com/auto-stack/auto-lang/blob/main/docs/roadmap-future.md)，不自动承诺 v0.7 全部交付。技术合同与已批准在途 Plan 的范围/验收保持，四线所需局部能力随所属主线验收。
+> 2026-10-21 版本范围更新：按[月度滚动规划](https://github.com/auto-stack/auto-lang/blob/master/docs/roadmap.md)，v0.6 仅保留工程重构、ACE、AutoGraphics/Forge 雏形与 Linux 四条主线。本文下方旧 v0.6/v0.7 版次和日历按历史排期读取；其余目标进入[远期 TODO](https://github.com/auto-stack/auto-lang/blob/master/docs/roadmap-future.md)，不自动承诺 v0.7 全部交付。技术合同与已批准在途 Plan 的范围/验收保持，四线所需局部能力随所属主线验收。
 
-> 2026-10-16；目标态草案，名称与协议尚未冻结；本轮不实施。来源为 AutoOS《设计跨平台输入法》，系统集成关联[平台阶段设计](https://github.com/auto-stack/auto-lang/blob/main/docs/design/strategy/platforms-v06.md)。
+> 2026-10-16；目标态草案，名称与协议尚未冻结；本轮不实施。来源为 AutoOS《设计跨平台输入法》，系统集成关联[平台阶段设计](https://github.com/auto-stack/auto-lang/blob/master/docs/design/strategy/platforms-v06.md)。
 
 ## 1. 长期目标与复用
 

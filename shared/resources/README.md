@@ -102,7 +102,7 @@ AutoIME 复用已安装的小狼毫 0.17.4 的 `rime.dll` 与共享数据；本�
 `Sql` 都不再召回 `SQLite`。空库整表观测：`s` 有 2752 条候选、「是」第 1，SQLite 全表
 缺席（`shared/tests/en-admission.json`，17 例全过；PLAN-071 的 13 例与 PLAN-073 的
 61 例质量语料同时保持全过）。显式大小写触发码（`SQ`、`SQLite` 命中 `SQLite`）属于
-[PLAN-078](https://github.com/auto-stack/auto-os/blob/main/docs/plans/archived/078-autoime-windows-daily-use-closeout.md) T-05，不在本条
+[PLAN-078](../../docs/plans/archived/078-autoime-windows-daily-use-closeout.md) T-05，不在本条
 开关内；本阶段大写输入仍不产生候选，只是不再借小写码泄漏到别名表。
 
 ## 版本 0.3.1（PLAN-078 T-04）：补充词与主词库同一学习域

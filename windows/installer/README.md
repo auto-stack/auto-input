@@ -1,15 +1,16 @@
 # AutoInput 离线安装包（PLAN-071 T-02；管理器 PLAN-072 T-04）
 
-在干净 Windows 11 x64（无小狼毫、无开发工具、断网）上安装 AutoIME 的
+在干净 Windows 11 x64（无小狼毫、无开发工具、断网）上安装 AutoInput 的
 单个离线安装包 `AutoInput-Setup-x64.exe`。
 
 ## 构建
 
+从仓库根目录构建发行安装包。
+
 ```cmd
-cd ..\ime && build.cmd        :: 显式准备：autoime_ime.dll + 工具
-cd ..\..\manager && pwsh -NoProfile -File scripts\prepare.ps1   :: 显式准备：启动器 + identity
-cd ..\installer
-build.cmd                     :: 核对随包引擎 → 暂存 → ISCC → dist\AutoInput-Setup-x64.exe
+windows\ime\build.cmd -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+pwsh -NoProfile -File manager\scripts\prepare.ps1 -Configuration release
+windows\installer\build.cmd
 ```
 
 - 前置：MSVC 2022 + CMake + Ninja（ime 构建）、Inno Setup 6（ISCC）。
@@ -64,7 +65,7 @@ BSD-3-Clause；随包共享数据取自小狼毫（GPL-3.0）发行包原样再�
 `pwsh -NoProfile -File run-t07.ps1` 为无需管理员权限的包验收：包哈希、payload
 清单、resources 与仓库逐文件一致、锁定清单哈希、模拟安装目录的全新部署与候选
 召回、升级保留用户文件（23 检查，约 14 s）。真实冷装/双宿主走查仍需管理员权限，
-见 PLAN-078 §10 的阻塞说明。
+见 [PLAN-078 §10](../../docs/plans/archived/078-autoime-windows-daily-use-closeout.md) 的记录。
 
 ## 0.2.0 打包与真机验收（PLAN-072 T-04）
 

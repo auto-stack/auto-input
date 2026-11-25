@@ -1,6 +1,6 @@
 # AutoInput 独立建仓评估（PLAN-078 T-07）
 
-2026-11-25 · 评估记录 · r1 · 关联 PLAN-078（`docs/plans/archived/078-autoime-windows-daily-use-closeout.md`）、
+2026-11-25 · 评估记录 · r1 · 关联 [PLAN-078](../../plans/archived/078-autoime-windows-daily-use-closeout.md)、
 [Design 07](../07-auto-input-shared-engine.md)、
 [App 子模块工作流程](https://github.com/auto-stack/auto-os/blob/main/docs/design/strategy/app-submodule-workflow.md)
 
@@ -8,7 +8,7 @@
 
 ## 1. 现状与拆分信号
 
-AutoInput 现在位于 `auto-os/experimental/autoime/`，规模与独立性已超出「实验目录」：
+评估时，AutoInput 位于 `auto-os/experimental/autoime/`，规模与独立性已超出「实验目录」：
 
 | 面 | 现状 | 独立仓信号 |
 |---|---|---|

@@ -12,11 +12,12 @@
 
 074 复用管理器业务逻辑与部署事务。076 复用共享引擎的确认与撤销学习能力。跨平台目标是统一会话、候选和词频行为。Linux 先验证系统输入框架与真实 Wayland 宿主，再评估 compositor 和 AutoUI 集成。参见[跨平台设计](design/cross-platform-input.md)。
 
-历史计划和验收在 AutoOS 归档：
+早期验收记录链接到 AutoOS，后续归档的验收记录也可在本仓查阅。
+当前待跟踪事项见[已知债务与风险](plans/KNOWN-DEBT-AND-RISKS.md)。
 
 - [PLAN-069](https://github.com/auto-stack/auto-os/blob/main/docs/plans/archived/069-autoime-windows-x64-tsf-preview.md)
 - [PLAN-070](https://github.com/auto-stack/auto-os/blob/main/docs/plans/archived/070-autoime-windows-daily-use.md)
 - [PLAN-071](https://github.com/auto-stack/auto-os/blob/main/docs/plans/archived/071-autoime-windows-offline-installer.md)
-- [PLAN-072](https://github.com/auto-stack/auto-os/blob/main/docs/plans/archived/072-autoime-ace-phrase-manager.md)
-- [PLAN-073](https://github.com/auto-stack/auto-os/blob/main/docs/plans/archived/073-autoime-pinyin-quality.md)
-- [PLAN-078](https://github.com/auto-stack/auto-os/blob/main/docs/plans/archived/078-autoime-windows-daily-use-closeout.md)
+- [PLAN-072](plans/archived/072-autoime-ace-phrase-manager.md)
+- [PLAN-073](plans/archived/073-autoime-pinyin-quality.md)
+- [PLAN-078](plans/archived/078-autoime-windows-daily-use-closeout.md)

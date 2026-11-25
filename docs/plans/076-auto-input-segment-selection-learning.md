@@ -20,7 +20,7 @@ touched_goals: []
 
 为输入人名、地名和未收录词提供一次性的“分词选字”操作：从完整拼音候选切到当前首音节，确认该字后锁定前缀，自动恢复剩余拼音的整体预测；用户可以重复分词，也可以一次选完后缀。完整结果作为同一次组合上屏，并学习最终文字与读音，提高后续全拼、简拼和混输下的个人排名。
 
-独立于 [073 拼音质量](https://github.com/auto-stack/auto-os/blob/main/docs/plans/archived/073-autoime-pinyin-quality.md)，原因是本包增加交互状态、原生候选窗操作、TSF 提交与学习事务、误学撤销，不能用“已有学习选项开启”代替功能交付。073 的 Shift 修复、常用词排序及原有验收均保留，073 不等待本包。
+独立于 [073 拼音质量](archived/073-autoime-pinyin-quality.md)，原因是本包增加交互状态、原生候选窗操作、TSF 提交与学习事务、误学撤销，不能用“已有学习选项开启”代替功能交付。073 的 Shift 修复、常用词排序及原有验收均保留，073 不等待本包。
 
 ## 1. 目标
 
@@ -41,7 +41,7 @@ touched_goals: []
 
 ## 3. 技术栈
 
-现有 librime、Rime YAML、C++17 TSF/Win32、已有 probe/fixture、Inno Setup。仓库 auto-os；拟实施树 `D:/autostack/auto-input`，在 `main` 上开发，work/review 顺序复用同一树。证据原件放 `D:/autostack/plan-artifacts/plan-076/`，必要结论写回本计划。
+现有 librime、Rime YAML、C++17 TSF/Win32、已有 probe/fixture、Inno Setup。仓库 auto-input；拟实施树 `D:/autostack/auto-input`，在 `main` 上开发，work/review 顺序复用同一树。证据原件放 `D:/autostack/plan-artifacts/plan-076/`，必要结论写回本计划。
 
 硬依赖为 071 的独立输入法与安装基础。073 与本包的 KeyRouter、schema、probe 和安装文件有重叠，实际代码写入及合入串行协调，建议先落地 073 的 Shift 修复，再做本包按键集成；T-01 可先行，不要求 073 的全部质量任务先结束。最终交付需包含对应 Shift 修复，竖线绑定不得依赖尚有缺陷的符号映射。072/074 是显式短语管理关联项，不是本包执行前置。
 

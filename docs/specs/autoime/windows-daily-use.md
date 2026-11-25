@@ -56,7 +56,7 @@ AutoInput Windows x64 在「日用」阶段的用户可见行为基线：候选�
   新版本所有者。所有者的命名管道在创建时显式授予当前用户 SID 完整访问，因此即使
   所有者由提升权限的宿主（如安装窗口的 TSF 激活）启动，普通权限的输入法也能连接；
   管道按“同一用户”授予访问，是明确的同用户信任边界（跨用户的完整性边界问题见
-  `docs/plans/KNOWN-DEBT-AND-RISKS.md` 的 `AUTOIME-OWNER-INTEGRITY`）。被宿主映射的锁定数据
+  [AUTOIME-OWNER-INTEGRITY](../../plans/KNOWN-DEBT-AND-RISKS.md#autoime-owner-integrity)）。被宿主映射的锁定数据
   （`rime.dll`、`data\`）在版本相同时用 `onlyifdoesntexist` 跳过，不在升级时触发
   「文件占用」中止。
 - 所有者空闲 10 分钟后先 finalize 用户库再退出，不长期占用可写词库。

@@ -15,6 +15,6 @@ AutoInput 原名 AutoIME，是 AutoStack 的独立输入法项目。当前交付
 pwsh -NoProfile -File .\manager\scripts\prepare.ps1 -Configuration debug
 ```
 
-运行 `windows/installer/build.cmd` 生成 `AutoInput-Setup-x64.exe`，发行构建使用 Inno Setup 6 和清单锁定的小狼毫材料。安装器 AppId、TSF 注册 GUID、安装目录 `%ProgramFiles%\AutoIME`、用户目录 `%LOCALAPPDATA%\AutoIME\rime`、Rime 方案键和 `autoime-config` 命令沿用原标识，支持用新版安装包继续读取原有词频、术语和短语。
+按[发行构建步骤](windows/installer/README.md#构建)生成 `AutoInput-Setup-x64.exe`，发行构建使用 Inno Setup 6 和清单锁定的小狼毫材料。安装器 AppId、TSF 注册 GUID、安装目录 `%ProgramFiles%\AutoIME`、用户目录 `%LOCALAPPDATA%\AutoIME\rime`、Rime 方案键和 `autoime-config` 命令沿用原标识，支持用新版安装包继续读取原有词频、术语和短语。
 
 源码基线为 [AutoOS](https://github.com/auto-stack/auto-os) `f75a3edc92e7329f734ae742044f186ab70a772b` 的 `experimental/autoime/`。历史验收见[路线](docs/ROADMAP.md)。

@@ -46,7 +46,7 @@ GUI 是独立管理进程。AutoUI/AGE 的组件和宿主能力是本包的实�
 
 | 来源 | 使用边界 |
 |---|---|
-| [072 草案](https://github.com/auto-stack/auto-os/blob/main/docs/plans/archived/072-autoime-ace-phrase-manager.md) | 约定 list/add/remove/import/export/deploy、共享 Auto 逻辑和事务恢复，是待核实的上游交付合同。 |
+| [072 草案](archived/072-autoime-ace-phrase-manager.md) | 约定 list/add/remove/import/export/deploy、共享 Auto 逻辑和事务恢复，是待核实的上游交付合同。 |
 | [设计 05](../design/05-auto-input-windows.md) | 已将图形词组管理列为后续扩展。 |
 | [AutoUI 104 归档](https://github.com/auto-stack/auto-ui/blob/main/docs/plans/archived/104-autoui-u02-pages-and-forms-av-vue.md) | 有 AV 页面、表单和事件的交付证据；具体应用中的动态数据与服务调用需实证。 |
 | `auto-ui/crates/auto-ui-runtime/examples/ace_node_desktop_window.rs` | 已有 --source/--package/--entry 和 NodeDesktopBridge::load_package 入口，供 T-01 核对。 |

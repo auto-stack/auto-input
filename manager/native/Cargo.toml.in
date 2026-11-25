@@ -1,0 +1,32 @@
+[package]
+name = "autoime-config"
+version = "0.1.0"
+edition = "2021"
+description = "AutoIME user-phrase manager — thin ACE AV launcher (PLAN-072)"
+publish = false
+
+# Generated from Cargo.toml.in by scripts/prepare.ps1 (the ACE source root is
+# resolved at prepare time: $AUTO_LANG_ROOT -> group sibling -> main checkout).
+# Never edit the generated manifest by hand.
+
+# Standalone workspace: this crate is not a member of auto-os' root workspace
+# (host/desktop), and its ACE dependencies live in another checkout.
+[workspace]
+
+[[bin]]
+name = "autoime-config"
+path = "src/main.rs"
+
+[dependencies]
+ace-core = { path = "@AUTO_LANG_ROOT@/experimental/ace/crates/core" }
+ace-source-query = { path = "@AUTO_LANG_ROOT@/experimental/ace/crates/source-query" }
+ace-av = { path = "@AUTO_LANG_ROOT@/experimental/ace/crates/av" }
+ace-av-core = { path = "@AUTO_LANG_ROOT@/experimental/ace/crates/av-core" }
+
+[profile.release]
+# The launcher spends its time in the ACE front end; keep the release build
+# fast to start and small enough for the offline package.
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = "debuginfo"

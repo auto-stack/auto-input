@@ -1,0 +1,5 @@
+# Built launcher and generated build inputs (PLAN-072).
+bin/
+native/Cargo.toml
+native/Cargo.lock
+native/target/

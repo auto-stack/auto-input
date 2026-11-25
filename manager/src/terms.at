@@ -1,0 +1,436 @@
+// terms.at — personal English terminology overlay for the AutoIME manager
+// (PLAN-078 T-05).
+//
+// File contract: <user data dir>\autoime_user_terms.dict.yaml is a Rime table
+// dictionary that the manager owns. Rows are <text><TAB><code><TAB><weight>;
+// the manager rewrites the file canonically (fixed Rime header + one row per
+// term), so it always stays deployable. Codes are 2..=32 ASCII letters and are
+// matched CHARACTER BY CHARACTER including case ("AS" and "as" differ); text
+// keeps its own case and spaces (1..=1024 scalars, no TAB/CR/LF/NUL); weight is
+// 1..=1000000 (the unsuffixed default is 1000).
+//
+// Parsing ignores everything up to and including a `...` Rime header
+// terminator, so the same function reads a full dictionary file and a bare
+// exported TSV list.
+//
+// This module is pure: it parses/merges/serializes text. The caller owns file
+// I/O, diagnostics, the atomic write and the deployment reload.
+//
+// Ownership discipline follows phrases.at: a `for`/`get(i)` yields a view that
+// cannot be passed as a value, so every list walk is a tail recursion that
+// consumes its input (`remove`) and rebuilds the output.
+
+use std.text.trim
+use std.text.split
+use std.text.lines
+use std.conv.from_int
+use app.phrases.valid_text
+use app.phrases.parse_weight
+use app.phrases.strip_cr
+
+pub type Term {
+    text Str
+    code Str
+    weight int
+}
+
+pub type TermDiag {
+    line int
+    kind Str
+    detail Str
+}
+
+// ---------------------------------------------------------------------------
+// Ownership helpers
+// ---------------------------------------------------------------------------
+
+fn take_term(xs List<Term>, i int) Term {
+    let v = xs.remove(i)
+    let c = Term(v.text.clone(), v.code.clone(), v.weight)
+    xs.insert(i, c.move)
+    return v
+}
+
+fn take_int(xs List<int>, i int) int {
+    let v = xs.remove(i)
+    xs.insert(i, v)
+    return v
+}
+
+fn take_str(xs List<Str>, i int) Str {
+    let v = xs.remove(i)
+    let c = v.clone()
+    xs.insert(i, c.move)
+    return v
+}
+
+fn set_cell(cell List<int>, i int, v int) int {
+    let old = cell.remove(i)
+    cell.insert(i, v)
+    return old
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+fn is_alpha_cp(cp int) bool {
+    if (cp >= 65 && cp <= 90) {
+        return true
+    }
+    return cp >= 97 && cp <= 122
+}
+
+fn scan_code(s Str, i int) int {
+    if (i >= s.len()) {
+        return 1
+    }
+    if (is_alpha_cp(s.char_at(i).to_codepoint())) {
+        return scan_code(s, i + 1)
+    }
+    return 0
+}
+
+// ---------------------------------------------------------------------------
+// Shipped placeholder
+//
+// librime cannot compile a table with zero entries, so the template carries one
+// inert row (code of 32 z, text AutoIME, weight 1). The manager hides it from
+// list/export, refuses to add or remove it, and re-emits it whenever the user
+// removes the last personal term.
+// ---------------------------------------------------------------------------
+
+pub fn placeholder_code() Str {
+    return "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+}
+
+pub fn placeholder_text() Str {
+    return "AutoIME"
+}
+
+pub fn is_placeholder(t Term) bool {
+    if (t.code == placeholder_code()) {
+        if (t.text == placeholder_text()) {
+            return true
+        }
+    }
+    return false
+}
+
+pub fn term_is_placeholder(xs List<Term>, i int) bool {
+    let t = take_term(xs, i)
+    return is_placeholder(t)
+}
+
+/// A trigger code is 2..=32 ASCII letters; case is significant.
+pub fn valid_term_code(s Str) bool {
+    if (s.len() < 2 || s.len() > 32) {
+        return false
+    }
+    return scan_code(s.clone(), 0) == 1
+}
+
+// ---------------------------------------------------------------------------
+// Parsing (dictionary header/comment/blank lines are skipped)
+// ---------------------------------------------------------------------------
+
+fn is_blank(s Str) bool {
+    return trim(s).len() == 0
+}
+
+fn is_comment(s Str) bool {
+    let t = trim(s.clone())
+    if (t.len() == 0) {
+        return false
+    }
+    return t.char_at(0).to_codepoint() == 35
+}
+
+fn push_diag(diags List<TermDiag>, line_no int, kind Str, detail Str) int {
+    diags.push(TermDiag(line_no, kind, detail))
+    return 0
+}
+
+fn push_line(terms List<Term>, diags List<TermDiag>, raw Str, line_no int) int {
+    if (is_blank(raw.clone())) {
+        return 0
+    }
+    if (is_comment(raw.clone())) {
+        return 0
+    }
+    let parts = split(raw.clone(), "\t")
+    if (parts.len() != 3) {
+        let d = push_diag(diags, line_no, "bad_columns", "expected 3 TAB-separated columns")
+        return 1
+    }
+    let text = parts.remove(0)
+    let code = parts.remove(0)
+    let wt = parts.remove(0)
+    if (valid_text(text.clone()) == false) {
+        let d = push_diag(diags, line_no, "bad_text", "text must be 1..=1024 scalars without TAB/CR/LF/NUL")
+        return 1
+    }
+    if (valid_term_code(code.clone()) == false) {
+        let d = push_diag(diags, line_no, "bad_code", "code must be 2..=32 ASCII letters (case-sensitive)")
+        return 1
+    }
+    let w = parse_weight(wt.clone())
+    is w {
+        Some(n) -> {
+            terms.push(Term(text, code, n))
+            return 0
+        }
+        None -> {
+            let d = push_diag(diags, line_no, "bad_weight", "weight must be an integer in 1..=1000000")
+            return 1
+        }
+    }
+}
+
+fn parse_walk(rest List<Str>, terms List<Term>, diags List<TermDiag>, line_no int) int {
+    if (rest.len() == 0) {
+        return 0
+    }
+    let raw0 Str = rest.remove(0)
+    let stripped = strip_cr(raw0)
+    let rc = push_line(terms, diags, stripped, line_no)
+    if (rc != 0) {
+        return 1
+    }
+    return parse_walk(rest, terms, diags, line_no + 1)
+}
+
+/// Drop everything up to and including the first `...` line; when there is no
+/// marker the whole input is kept (bare TSV export).
+fn drop_header(rest List<Str>, found int, out List<Str>) int {
+    if (rest.len() == 0) {
+        return found
+    }
+    let raw = rest.remove(0)
+    if (found == 1) {
+        out.push(raw.move)
+        return drop_header(rest, 1, out)
+    }
+    if (trim(raw.clone()) == "...") {
+        return drop_header(rest, 1, out)
+    }
+    return drop_header(rest, 0, out)
+}
+
+fn has_marker(rest List<Str>, i int) int {
+    if (i >= rest.len()) {
+        return 0
+    }
+    let raw = take_str(rest, i)
+    if (trim(raw.clone()) == "...") {
+        return 1
+    }
+    return has_marker(rest, i + 1)
+}
+
+fn copy_all(rest List<Str>, out List<Str>) int {
+    if (rest.len() == 0) {
+        return 0
+    }
+    let raw = rest.remove(0)
+    out.push(raw.move)
+    return copy_all(rest, out)
+}
+
+/// Parse a personal term file. On the first rejected line a diagnostic is
+/// appended and an empty list is returned (the caller reports and stops).
+pub fn parse_terms(content Str, diags List<TermDiag>) List<Term> {
+    let terms = List<Term>.new()
+    let body = List<Str>.new()
+    let rest = lines(content)
+    if (has_marker(rest, 0) == 1) {
+        let d = drop_header(rest, 0, body)
+    } else {
+        let d2 = copy_all(rest, body)
+    }
+    let rc = parse_walk(body, terms, diags, 1)
+    if (rc != 0) {
+        let empty = List<Term>.new()
+        return empty
+    }
+    return terms
+}
+
+// ---------------------------------------------------------------------------
+// Mutation (consume-and-rebuild)
+// ---------------------------------------------------------------------------
+
+fn upsert_walk(
+    rest List<Term>,
+    out List<Term>,
+    code Str,
+    text Str,
+    weight int,
+    state List<int>
+) int {
+    if (rest.len() == 0) {
+        return 0
+    }
+    let t = rest.remove(0)
+    if (t.code == code) {
+        if (t.text == text) {
+            let seen = take_int(state, 0)
+            if (seen == 0) {
+                set_cell(state, 0, 1)
+                if (t.weight != weight) {
+                    set_cell(state, 1, 1)
+                }
+                out.push(Term(t.text, t.code, weight))
+            } else {
+                set_cell(state, 1, 1)
+            }
+            return upsert_walk(rest, out, code.clone(), text.clone(), weight, state)
+        }
+    }
+    out.push(t.move)
+    return upsert_walk(rest, out, code.clone(), text.clone(), weight, state)
+}
+
+/// Apply an (code,text,weight) upsert; duplicates of the key collapse into the
+/// first row. state[0] = seen, state[1] = changed.
+pub fn upsert_terms(terms List<Term>, code Str, text Str, weight int, state List<int>) List<Term> {
+    let out = List<Term>.new()
+    let d = upsert_walk(terms, out, code.clone(), text.clone(), weight, state)
+    if (take_int(state, 0) == 0) {
+        let t = Term(text.clone(), code.clone(), weight)
+        out.push(t.move)
+        set_cell(state, 1, 1)
+    }
+    return out
+}
+
+fn remove_walk(rest List<Term>, out List<Term>, code Str, text Str, state List<int>) int {
+    if (rest.len() == 0) {
+        return 0
+    }
+    let t = rest.remove(0)
+    if (t.code == code) {
+        if (t.text == text) {
+            set_cell(state, 0, 1)
+            set_cell(state, 1, 1)
+            return remove_walk(rest, out, code.clone(), text.clone(), state)
+        }
+    }
+    out.push(t.move)
+    return remove_walk(rest, out, code.clone(), text.clone(), state)
+}
+
+/// Drop every row with (code,text). state[0] = 1 when something was removed.
+pub fn remove_term(terms List<Term>, code Str, text Str, state List<int>) List<Term> {
+    let out = List<Term>.new()
+    let d = remove_walk(terms, out, code.clone(), text.clone(), state)
+    return out
+}
+
+// ---------------------------------------------------------------------------
+// Serialization
+// ---------------------------------------------------------------------------
+
+fn format_term(t Term) Str {
+    return t.text + "\t" + t.code + "\t" + from_int(t.weight)
+}
+
+fn join_walk(lines List<Str>, started int, acc Str) Str {
+    if (lines.len() == 0) {
+        return acc
+    }
+    let l Str = lines.remove(0)
+    if (started == 0) {
+        return join_walk(lines, 1, l.move)
+    }
+    return join_walk(lines, 1, acc + "\n" + l)
+}
+
+fn rows_walk(terms List<Term>, out List<Str>, i int) int {
+    if (i >= terms.len()) {
+        return 0
+    }
+    let t = take_term(terms, i)
+    let line = format_term(t)
+    out.push(line.move)
+    return rows_walk(terms, out, i + 1)
+}
+
+fn header() Str {
+    var s = "# AutoIME personal English terms (PLAN-078 T-05).\n"
+    s = s + "# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n"
+    s = s + "# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n"
+    s = s + "---\n"
+    s = s + "name: autoime_user_terms\n"
+    s = s + "version: \"0.1.0\"\n"
+    s = s + "sort: by_weight\n"
+    s = s + "columns:\n"
+    s = s + "  - text\n"
+    s = s + "  - code\n"
+    s = s + "  - weight\n"
+    s = s + "...\n"
+    return s
+}
+
+/// Canonical file text: fixed header + one row per term (source order). An
+/// otherwise empty table keeps the shipped placeholder row so it compiles.
+pub fn serialize_terms(terms List<Term>) Str {
+    let count = terms.len()
+    let out = List<Str>.new()
+    let d = rows_walk(terms, out, 0)
+    if (count == 0) {
+        out.push(placeholder_text() + "\t" + placeholder_code() + "\t1")
+    }
+    let body = join_walk(out, 0, "")
+    return header() + body + "\n"
+}
+
+fn export_walk(terms List<Term>, out List<Str>, i int) int {
+    if (i >= terms.len()) {
+        return 0
+    }
+    if (term_is_placeholder(terms, i) == false) {
+        out.push(term_line(terms, i))
+    }
+    return export_walk(terms, out, i + 1)
+}
+
+/// Export rows only (TSV, LF after each row); the shipped placeholder is not
+/// user data and is never exported.
+pub fn export_terms(terms List<Term>) Str {
+    let out = List<Str>.new()
+    let d = export_walk(terms, out, 0)
+    if (out.len() == 0) {
+        return ""
+    }
+    let body = join_walk(out, 0, "")
+    return body + "\n"
+}
+
+pub fn terms_count(terms List<Term>) int {
+    return terms.len()
+}
+
+pub fn take_term_at(xs List<Term>, i int) Term {
+    return take_term(xs, i)
+}
+
+pub fn term_line(xs List<Term>, i int) Str {
+    let t = take_term(xs, i)
+    return format_term(t)
+}
+
+pub fn term_code(xs List<Term>, i int) Str {
+    let t = take_term(xs, i)
+    return t.code
+}
+
+pub fn term_text(xs List<Term>, i int) Str {
+    let t = take_term(xs, i)
+    return t.text
+}
+
+pub fn term_weight(xs List<Term>, i int) int {
+    let t = take_term(xs, i)
+    return t.weight
+}

@@ -1,0 +1,425 @@
+// AutoIME manager shared phrase cases (PLAN-072 T-02/T-05).
+//
+// Durable author source for the phrase-management behaviour: inputs, the
+// command line under test, and independent expectations. The runner
+// manager/scripts/test.ps1 executes every case against the prepared launcher
+// on the new ACE AV and compares exit status, stdout lines, stderr fragments
+// and final file bytes.
+//
+// One launcher invocation per case: every launcher run compiles the Auto
+// closure through the ACE front door (there is no cross-process artifact
+// cache in this lane), so a case is one command over a pre-seeded data file.
+// This also keeps each case inside the <=10 s per-case budget.
+//
+// These are CLI/file-level cases on purpose: the registered AutoDown TestCase
+// recipes (auto-case) cover source-level adapters (avm/a2r/probe scalar) and
+// have no recipe for an argv+files+exit contract, so this suite keeps the same
+// author-source/independent-expectation discipline in the repo's JSON case
+// table precedent (PLAN-071 shared/tests/cases.json). A future AutoDown recipe
+// can consume this table without changing the cases.
+//
+// Placeholders: the runner appends `--user-data-dir <caseDir>/<user_data_dir>`
+// to the step, and files are written before it runs.
+
+{
+  "format": "autoime-manager-cases@1",
+  "user_data_dir": "data",
+  "cases": [
+    {
+      "id": "V-02-list-bom-crlf-comments",
+      "files": [
+        {
+          "path": "data/custom_phrase.txt",
+          "base64": "77u/6auY6YCf57yT5a2YCWdhb3N1aHVhbmN1bgkxDQojIOeUqOaIt+Wkh+azqA0K"
+        }
+      ],
+      "steps": [
+        { "args": ["phrases", "list"], "exit": 0, "stdout": ["高速缓存\tgaosuhuancun\t1"] }
+      ],
+      "final": [
+        {
+          "path": "data/custom_phrase.txt",
+          "base64": "77u/6auY6YCf57yT5a2YCWdhb3N1aHVhbmN1bgkxDQojIOeUqOaIt+Wkh+azqA0K"
+        }
+      ]
+    },
+    {
+      "id": "V-02-add-appends-after-comments",
+      "files": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n# 用户备注\n" }
+      ],
+      "steps": [
+        {
+          "args": ["phrases", "add", "--code", "zlby", "--text", "增量编译", "--weight", "100"],
+          "exit": 0,
+          "stdout": []
+        }
+      ],
+      "final": [
+        {
+          "path": "data/custom_phrase.txt",
+          "text": "高速缓存\tgaosuhuancun\t1\n# 用户备注\n增量编译\tzlby\t100\n"
+        }
+      ]
+    },
+    {
+      "id": "V-02-add-idempotent",
+      "files": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n增量编译\tzlby\t100\n" }
+      ],
+      "steps": [
+        {
+          "args": ["phrases", "add", "--code", "zlby", "--text", "增量编译", "--weight", "100"],
+          "exit": 0,
+          "final_unchanged": true
+        }
+      ],
+      "final": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n增量编译\tzlby\t100\n" }
+      ]
+    },
+    {
+      "id": "V-02-add-weight-update",
+      "files": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n增量编译\tzlby\t100\n" }
+      ],
+      "steps": [
+        {
+          "args": ["phrases", "add", "--code", "zlby", "--text", "增量编译", "--weight", "250"],
+          "exit": 0
+        }
+      ],
+      "final": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n增量编译\tzlby\t250\n" }
+      ]
+    },
+    {
+      "id": "V-02-add-same-code-distinct-text",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "增量编译\tzlby\t100\n" }],
+      "steps": [
+        {
+          "args": ["phrases", "add", "--code", "zlby", "--text", "增量构建"],
+          "exit": 0
+        }
+      ],
+      "final": [
+        { "path": "data/custom_phrase.txt", "text": "增量编译\tzlby\t100\n增量构建\tzlby\t100\n" }
+      ]
+    },
+    {
+      "id": "V-02-remove-existing",
+      "files": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n合成词\tqztest\t42\n" }
+      ],
+      "steps": [
+        { "args": ["phrases", "remove", "--code", "qztest", "--text", "合成词"], "exit": 0 }
+      ],
+      "final": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" }
+      ]
+    },
+    {
+      "id": "V-02-remove-absent-noop",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" }],
+      "steps": [
+        {
+          "args": ["phrases", "remove", "--code", "qztest", "--text", "合成词"],
+          "exit": 0,
+          "final_unchanged": true
+        }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" }]
+    },
+    {
+      "id": "V-03-duplicate-keys-merge-on-update",
+      "files": [
+        {
+          "path": "data/custom_phrase.txt",
+          "text": "合成词\tqztest\t1\n# 中间注释\n合成词\tqztest\t2\n"
+        }
+      ],
+      "steps": [
+        { "args": ["phrases", "add", "--code", "qztest", "--text", "合成词", "--weight", "9"], "exit": 0 }
+      ],
+      "final": [
+        { "path": "data/custom_phrase.txt", "text": "合成词\tqztest\t9\n# 中间注释\n" }
+      ]
+    },
+    {
+      "id": "V-02-import-valid-merge",
+      "files": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n增量编译\tzlby\t100\n" },
+        { "path": "in.txt", "text": "# 导入\n合成词\tqztest\t42\n增量编译\tzlby\t300\n" }
+      ],
+      "steps": [
+        { "args": ["phrases", "import", "--file", "in.txt"], "exit": 0 }
+      ],
+      "final": [
+        {
+          "path": "data/custom_phrase.txt",
+          "text": "高速缓存\tgaosuhuancun\t1\n增量编译\tzlby\t300\n合成词\tqztest\t42\n"
+        }
+      ]
+    },
+    {
+      "id": "V-03-import-invalid-batch-rejected",
+      "files": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" },
+        { "path": "in.txt", "text": "好词\tgoodcode\t5\n坏词\tbadcode\t0\n" }
+      ],
+      "steps": [
+        {
+          "args": ["phrases", "import", "--file", "in.txt"],
+          "exit": 3,
+          "stderr_has": ["line 2", "bad_weight"],
+          "final_unchanged": true
+        }
+      ],
+      "final": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" }
+      ]
+    },
+    {
+      "id": "V-03-import-missing-file",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" }],
+      "steps": [
+        {
+          "args": ["phrases", "import", "--file", "nope.txt"],
+          "exit": 4,
+          "stderr_has": ["not found"],
+          "final_unchanged": true
+        }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" }]
+    },
+    {
+      "id": "V-03-import-invalid-utf8",
+      "files": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" },
+        { "path": "in.txt", "base64": "Yf/+" }
+      ],
+      "steps": [
+        { "args": ["phrases", "import", "--file", "in.txt"], "exit": 4, "final_unchanged": true }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" }]
+    },
+    {
+      "id": "V-03-bad-existing-line-refused",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "好词\tgoodcode\t5\n这不是三列\n" }],
+      "steps": [
+        {
+          "args": ["phrases", "add", "--code", "abc", "--text", "x"],
+          "exit": 3,
+          "stderr_has": ["line 2", "bad_columns"],
+          "final_unchanged": true
+        }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "好词\tgoodcode\t5\n这不是三列\n" }]
+    },
+    {
+      "id": "V-03-unicode-emoji-add",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "" }],
+      "steps": [
+        { "args": ["phrases", "add", "--code", "emj", "--text", "甲😀乙 空格"], "exit": 0 }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "甲😀乙 空格\temj\t100\n" }]
+    },
+    {
+      "id": "V-02-export-tsv",
+      "files": [
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n合成词\tqztest\t42\n" }
+      ],
+      "steps": [
+        { "args": ["phrases", "export", "--file", "out.txt"], "exit": 0 }
+      ],
+      "final": [
+        { "path": "out.txt", "text": "高速缓存\tgaosuhuancun\t1\n合成词\tqztest\t42\n" },
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n合成词\tqztest\t42\n" }
+      ]
+    },
+    {
+      "id": "V-02-export-missing-parent-dir",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" }],
+      "steps": [
+        { "args": ["phrases", "export", "--file", "no-such-dir/out.txt"], "exit": 4 }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" }]
+    },
+    {
+      "id": "V-02-list-comments-only-empty",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "# only comments\n\n" }],
+      "steps": [{ "args": ["phrases", "list"], "exit": 0, "stdout": [] }],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "# only comments\n\n" }]
+    },
+    {
+      "id": "V-02-add-into-empty-file",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "" }],
+      "steps": [
+        { "args": ["phrases", "add", "--code", "abc", "--text", "空文件加词"], "exit": 0 }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "空文件加词\tabc\t100\n" }]
+    },
+    {
+      "id": "V-03-validation-code",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "" }],
+      "steps": [
+        { "args": ["phrases", "add", "--code", "ZLB", "--text", "x"], "exit": 2, "stderr_has": ["--code"] }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "" }]
+    },
+    {
+      "id": "V-03-validation-text",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "" }],
+      "steps": [
+        { "args": ["phrases", "add", "--code", "abc", "--text", ""], "exit": 2, "stderr_has": ["--text"] }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "" }]
+    },
+    {
+      "id": "V-03-validation-weight",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "" }],
+      "steps": [
+        {
+          "args": ["phrases", "add", "--code", "abc", "--text", "x", "--weight", "1000001"],
+          "exit": 2,
+          "stderr_has": ["--weight"]
+        }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "" }]
+    },
+    {
+      "id": "V-02-deploy-honours-user-dir",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" }],
+      "steps": [{ "args": ["deploy"], "exit": 0 }],
+      "final": [
+        { "path": "data/.autoime-resources", "exists": true },
+        { "path": "data/.autoime-phrase-version", "exists": true },
+        { "path": "data/custom_phrase.txt", "text": "高速缓存\tgaosuhuancun\t1\n" }
+      ]
+    },
+    {
+      "id": "V-03-dangling-option-value",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "" }],
+      "steps": [
+        {
+          "args": ["phrases", "add", "--code", "abc", "--text", "x", "--user-data-dir"],
+          "no_user_dir_arg": true,
+          "exit": 2,
+          "stderr_has": ["--user-data-dir", "needs a value"]
+        }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "" }]
+    },
+    {
+      "id": "V-03-empty-user-dir-value",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "" }],
+      "steps": [
+        {
+          "args": ["phrases", "add", "--code", "abc", "--text", "x", "--user-data-dir", ""],
+          "exit": 2,
+          "stderr_has": ["--user-data-dir", "needs a value"],
+          "final_unchanged": true
+        }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "" }]
+    },
+    {
+      "id": "V-02-text-equals-option-name",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "" }],
+      "steps": [
+        { "args": ["phrases", "add", "--code", "abc", "--text", "--file"], "exit": 0 }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "--file\tabc\t100\n" }]
+    },
+    {
+      "id": "V-02-usage-unknown-subcommand",
+      "files": [{ "path": "data/custom_phrase.txt", "text": "" }],
+      "steps": [
+        { "args": ["phrases", "frobnicate"], "exit": 2, "stderr_has": ["usage"] }
+      ],
+      "final": [{ "path": "data/custom_phrase.txt", "text": "" }]
+    }
+    ,
+    {
+      "id": "T-05-add-default-weight-and-merge",
+      "files": [{ "path": "data/autoime_user_terms.dict.yaml", "text": "# AutoIME personal English terms (PLAN-078 T-05).\n# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n---\nname: autoime_user_terms\nversion: \"0.1.0\"\nsort: by_weight\ncolumns:\n  - text\n  - code\n  - weight\n...\nAutoScape\tSQ\t1000\n" }],
+      "steps": [
+        { "args": ["terms", "add", "--code", "AS", "--text", "AutoScape"], "exit": 0 }
+      ],
+      "final": [{ "path": "data/autoime_user_terms.dict.yaml", "text": "# AutoIME personal English terms (PLAN-078 T-05).\n# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n---\nname: autoime_user_terms\nversion: \"0.1.0\"\nsort: by_weight\ncolumns:\n  - text\n  - code\n  - weight\n...\nAutoScape\tSQ\t1000\nAutoScape\tAS\t1000\n" }]
+    },
+    {
+      "id": "T-05-add-rejects-short-code",
+      "files": [],
+      "steps": [
+        { "args": ["terms", "add", "--code", "A", "--text", "AutoScape"], "exit": 3, "stderr_has": ["2..=32"] }
+      ],
+      "final": []
+    },
+    {
+      "id": "T-05-list-personal-and-builtin",
+      "files": [{ "path": "data/autoime_user_terms.dict.yaml", "text": "# AutoIME personal English terms (PLAN-078 T-05).\n# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n---\nname: autoime_user_terms\nversion: \"0.1.0\"\nsort: by_weight\ncolumns:\n  - text\n  - code\n  - weight\n...\nAutoScape\tSQ\t1000\nAutoScape\tAS\t1000\n" }],
+      "steps": [
+        { "args": ["terms", "list"], "exit": 0, "stdout": [
+          "AutoScape\tSQ\t1000\tpersonal",
+          "AutoScape\tAS\t1000\tpersonal",
+          "ROS 2\tros\t1000\tbuiltin",
+          "AutoOS\tautoos\t900\tbuiltin",
+          "AutoEdit\tautoedit\t900\tbuiltin",
+          "AutoIME\tautoime\t900\tbuiltin",
+          "AutoStack\tautostack\t800\tbuiltin",
+          "librime\tlibrime\t800\tbuiltin",
+          "TSF\ttsf\t800\tbuiltin",
+          "gRPC\tgrpc\t700\tbuiltin",
+          "OpenCC\topencc\t700\tbuiltin",
+          "SQLite\tsqlite\t700\tbuiltin",
+          "SQLite\tSQLite\t1200\tbuiltin"
+        ] }
+      ],
+      "final": [{ "path": "data/autoime_user_terms.dict.yaml", "text": "# AutoIME personal English terms (PLAN-078 T-05).\n# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n---\nname: autoime_user_terms\nversion: \"0.1.0\"\nsort: by_weight\ncolumns:\n  - text\n  - code\n  - weight\n...\nAutoScape\tSQ\t1000\nAutoScape\tAS\t1000\n" }]
+    },
+    {
+      "id": "T-05-export-personal-terms",
+      "files": [{ "path": "data/autoime_user_terms.dict.yaml", "text": "# AutoIME personal English terms (PLAN-078 T-05).\n# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n---\nname: autoime_user_terms\nversion: \"0.1.0\"\nsort: by_weight\ncolumns:\n  - text\n  - code\n  - weight\n...\nAutoScape\tSQ\t1000\nAutoScape\tAS\t1000\n" }],
+      "steps": [
+        { "args": ["terms", "export", "--file", "data/out.tsv"], "exit": 0 }
+      ],
+      "final": [{ "path": "data/out.tsv", "text": "AutoScape\tSQ\t1000\nAutoScape\tAS\t1000\n" }]
+    },
+    {
+      "id": "T-05-remove-keeps-other-row",
+      "files": [{ "path": "data/autoime_user_terms.dict.yaml", "text": "# AutoIME personal English terms (PLAN-078 T-05).\n# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n---\nname: autoime_user_terms\nversion: \"0.1.0\"\nsort: by_weight\ncolumns:\n  - text\n  - code\n  - weight\n...\nAutoScape\tSQ\t1000\nAutoScape\tAS\t1000\n" }],
+      "steps": [
+        { "args": ["terms", "remove", "--code", "SQ", "--text", "AutoScape"], "exit": 0 }
+      ],
+      "final": [{ "path": "data/autoime_user_terms.dict.yaml", "text": "# AutoIME personal English terms (PLAN-078 T-05).\n# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n---\nname: autoime_user_terms\nversion: \"0.1.0\"\nsort: by_weight\ncolumns:\n  - text\n  - code\n  - weight\n...\nAutoScape\tAS\t1000\n" }]
+    },
+    {
+      "id": "T-05-import-bad-weight-refused",
+      "files": [
+        { "path": "data/autoime_user_terms.dict.yaml", "text": "# AutoIME personal English terms (PLAN-078 T-05).\n# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n---\nname: autoime_user_terms\nversion: \"0.1.0\"\nsort: by_weight\ncolumns:\n  - text\n  - code\n  - weight\n...\nAutoScape\tAS\t1000\n" },
+        { "path": "data/import.tsv", "text": "AutoScape\tAS\tabc\n" }
+      ],
+      "steps": [
+        { "args": ["terms", "import", "--file", "data/import.tsv"], "exit": 3, "stderr_has": ["bad_weight"] }
+      ],
+      "final": [{ "path": "data/autoime_user_terms.dict.yaml", "text": "# AutoIME personal English terms (PLAN-078 T-05).\n# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n---\nname: autoime_user_terms\nversion: \"0.1.0\"\nsort: by_weight\ncolumns:\n  - text\n  - code\n  - weight\n...\nAutoScape\tAS\t1000\n" }]
+    },
+    {
+      "id": "T-05-add-rejects-reserved-code",
+      "files": [],
+      "steps": [
+        { "args": ["terms", "add", "--code", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", "--text", "AutoIME"], "exit": 3, "stderr_has": ["reserved"] }
+      ],
+      "final": []
+    },
+    {
+      "id": "T-05-remove-last-keeps-placeholder",
+      "files": [{ "path": "data/autoime_user_terms.dict.yaml", "text": "# AutoIME personal English terms (PLAN-078 T-05).\n# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n---\nname: autoime_user_terms\nversion: \"0.1.0\"\nsort: by_weight\ncolumns:\n  - text\n  - code\n  - weight\n...\nAutoScape\tAS\t1000\n" }],
+      "steps": [
+        { "args": ["terms", "remove", "--code", "AS", "--text", "AutoScape"], "exit": 0 }
+      ],
+      "final": [{ "path": "data/autoime_user_terms.dict.yaml", "text": "# AutoIME personal English terms (PLAN-078 T-05).\n# Managed by `autoime-config terms`; rows are <text><TAB><code><TAB><weight>.\n# Codes are 2..=32 ASCII letters and case-sensitive (AS != as).\n---\nname: autoime_user_terms\nversion: \"0.1.0\"\nsort: by_weight\ncolumns:\n  - text\n  - code\n  - weight\n...\nAutoIME\tzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\t1\n" }]
+    }
+  ]
+}

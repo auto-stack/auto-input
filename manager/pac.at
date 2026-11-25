@@ -1,0 +1,11 @@
+// pac.at — AutoIME user-phrase manager (PLAN-072).
+//
+// A command-line product, not a UI app: no scene/ports. The Auto business
+// source lives under src/ and is executed by the thin ACE AV launcher in
+// native/ (built by scripts/prepare.ps1). The launcher, not this manifest,
+// decides the runtime; this file only names the product and its entry.
+
+name: "autoime-manager"
+version: "0.1.0"
+description: "AutoInput user phrase manager — list/add/remove/import/export and deploy (ACE AV)"
+entry: "src/main.at"

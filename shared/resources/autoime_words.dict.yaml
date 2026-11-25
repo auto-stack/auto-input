@@ -1,0 +1,27 @@
+# Rime dictionary - AutoIME shared natural-pinyin word corrections (PLAN-073).
+# encoding: utf-8
+#
+# Ordinary natural-pinyin words whose weight in the Weasel 0.17.4 preset
+# vocabulary (essay.txt) is far below their modern usage frequency. They stay
+# in the normal pinyin path: standard readings, no explicit short codes, and
+# they compete with the preset vocabulary on the same syllable/abbreviation
+# graph. Do not put personal codes here (that is custom_phrase.txt / PLAN-072).
+#
+# Why 是的: essay.txt ships it at weight 776 while co-frequency words are
+# 使得 28566 / 速度 35075 / 上的 83517, so it is recalled but ranks 7th
+# ("shide") to 199th ("sd") - outside the top-5 the product promises. The
+# weight below sits near the high-frequency two-syllable band so the word is
+# usable through full pinyin, mixed and pure-abbreviation input while other
+# legal words (使得/速度/时代/设定/上的) stay in the same first page where they
+# were frozen.
+---
+name: autoime_words
+version: "0.1.0"
+sort: by_weight
+columns:
+  - text
+  - code
+  - weight
+...
+
+是的	shi de	40000

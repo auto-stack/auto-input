@@ -1,0 +1,535 @@
+// phrases.at — explicit-phrase file model for the AutoIME manager (PLAN-072).
+//
+// File contract (PLAN-070..071, docs/specs/autoime/phrase-management.md):
+//   <text><TAB><code><TAB><weight>, UTF-8, '#' comment lines, blank lines.
+// Codes are 1..=64 lowercase ASCII letters; text is 1..=1024 scalars with no
+// TAB/CR/LF/NUL; weight is a decimal integer in 1..=1000000 (the fixed
+// supported range recorded in spec delta SD-01).
+//
+// This module is pure: parse a source text into entries, apply add/remove/
+// import merges, and serialize while preserving every untouched line's bytes
+// and order. The caller owns file I/O, diagnostics and the atomic write.
+//
+// Ownership discipline on this AV profile (T-01/T-02 findings): a `for` over a
+// list or `get(i)` yields a *view* that cannot be passed as a value (only
+// `.len()` is consumable); owned values come from `remove(i)`/`remove(0)` and
+// `.move`, and a moved local is dead afterwards. Every list walk below is a
+// tail recursion that consumes its input and rebuilds the result, which is the
+// same shape the frozen system library uses.
+
+use std.text.trim
+use std.text.split
+use std.text.lines
+use std.text.substr
+use std.conv.to_int
+use std.conv.from_int
+
+/// One parsed phrase entry. `at` is the source line index (0-based); `-1`
+/// means "added by this command, not present in the source".
+pub type Entry {
+    text Str
+    code Str
+    weight int
+    at int
+}
+
+/// One diagnostic for a rejected source line (1-based line number).
+pub type Diag {
+    line int
+    kind Str
+    detail Str
+}
+
+/// A parsed source: raw lines (CR stripped), a per-line kind (0 = verbatim,
+/// 1 = entry line), parsed entries in file order, and ok = 0 when rejected.
+pub type Snapshot {
+    lines List<Str>
+    kinds List<int>
+    entries List<Entry>
+    ok int
+}
+
+// ---------------------------------------------------------------------------
+// List ownership helpers (see the module comment)
+// ---------------------------------------------------------------------------
+
+fn take_str(xs List<Str>, i int) Str {
+    let v = xs.remove(i)
+    let c = v.clone()
+    xs.insert(i, c.move)
+    return v
+}
+
+fn take_int(xs List<int>, i int) int {
+    let v = xs.remove(i)
+    xs.insert(i, v)
+    return v
+}
+
+fn take_entry(xs List<Entry>, i int) Entry {
+    let v = xs.remove(i)
+    let c = Entry(v.text.clone(), v.code.clone(), v.weight, v.at)
+    xs.insert(i, c.move)
+    return v
+}
+
+fn set_cell(cell List<int>, i int, v int) int {
+    let old = cell.remove(i)
+    cell.insert(i, v)
+    return old
+}
+
+fn set_cell_list(cell List<int>, i int, v int) int {
+    return set_cell(cell, i, v)
+}
+
+// ---------------------------------------------------------------------------
+// Character predicates (scalar/codepoint level)
+// ---------------------------------------------------------------------------
+
+fn is_digit_cp(cp int) bool {
+    return cp >= 48 && cp <= 57
+}
+
+fn is_lower_alpha_cp(cp int) bool {
+    return cp >= 97 && cp <= 122
+}
+
+fn scan_code(s Str, i int) int {
+    if (i >= s.len()) {
+        return 1
+    }
+    let cp = s.char_at(i).to_codepoint()
+    if (is_lower_alpha_cp(cp)) {
+        return scan_code(s, i + 1)
+    }
+    return 0
+}
+
+fn scan_text(s Str, i int) int {
+    if (i >= s.len()) {
+        return 1
+    }
+    let cp = s.char_at(i).to_codepoint()
+    if (cp == 9 || cp == 10 || cp == 13 || cp == 0) {
+        return 0
+    }
+    return scan_text(s, i + 1)
+}
+
+fn scan_digits(s Str, i int) int {
+    if (i >= s.len()) {
+        return 1
+    }
+    let cp = s.char_at(i).to_codepoint()
+    if (is_digit_cp(cp)) {
+        return scan_digits(s, i + 1)
+    }
+    return 0
+}
+
+/// A code is 1..=64 lowercase ASCII letters.
+pub fn valid_code(s Str) bool {
+    if (s.len() < 1 || s.len() > 64) {
+        return false
+    }
+    if (scan_code(s.clone(), 0) == 1) {
+        return true
+    }
+    return false
+}
+
+/// Text is 1..=1024 scalars, with no TAB/CR/LF/NUL.
+pub fn valid_text(s Str) bool {
+    if (s.len() < 1 || s.len() > 1024) {
+        return false
+    }
+    if (scan_text(s.clone(), 0) == 1) {
+        return true
+    }
+    return false
+}
+
+/// Weight is 1..=1000000 (1..=7 ASCII digits, no sign).
+pub fn parse_weight(s Str) ?int {
+    if (s.len() < 1 || s.len() > 7) {
+        return None
+    }
+    if (scan_digits(s.clone(), 0) == 0) {
+        return None
+    }
+    let v = to_int(s)
+    is v {
+        Some(n) -> {
+            if (n < 1 || n > 1000000) {
+                return None
+            }
+            return Some(n)
+        }
+        None -> { return None }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Parsing
+// ---------------------------------------------------------------------------
+
+/// Remove one trailing CR (CRLF input); other scalars are preserved.
+pub fn strip_cr(s Str) Str {
+    let n = s.len()
+    if (n == 0) {
+        return ""
+    }
+    if (s.char_at(n - 1).to_codepoint() == 13) {
+        return substr(s, 0, n - 1)
+    }
+    return s.clone()
+}
+
+fn is_blank(s Str) bool {
+    return trim(s).len() == 0
+}
+
+fn is_comment(s Str) bool {
+    let t = trim(s.clone())
+    if (t.len() == 0) {
+        return false
+    }
+    return t.char_at(0).to_codepoint() == 35
+}
+
+fn push_diag(diags List<Diag>, line_no int, kind Str, detail Str) int {
+    diags.push(Diag(line_no, kind, detail))
+    return 0
+}
+
+/// Parse one line into the snapshot lists. Returns 0 on success, 1 when the
+/// line was rejected (one diagnostic appended).
+fn push_line(
+    lines List<Str>,
+    kinds List<int>,
+    entries List<Entry>,
+    diags List<Diag>,
+    raw Str,
+    line_no int
+) int {
+    if (is_blank(raw.clone())) {
+        lines.push(raw.move)
+        kinds.push(0)
+        return 0
+    }
+    if (is_comment(raw.clone())) {
+        lines.push(raw.move)
+        kinds.push(0)
+        return 0
+    }
+    let parts = split(raw.clone(), "\t")
+    if (parts.len() != 3) {
+        let d = push_diag(diags, line_no, "bad_columns", "expected 3 TAB-separated columns")
+        lines.push(raw.move)
+        kinds.push(0)
+        return 1
+    }
+    let text = parts.remove(0)
+    let code = parts.remove(0)
+    let wt = parts.remove(0)
+    if (valid_text(text.clone()) == false) {
+        let d = push_diag(diags, line_no, "bad_text", "text must be 1..=1024 scalars without TAB/CR/LF/NUL")
+        lines.push(raw.move)
+        kinds.push(0)
+        return 1
+    }
+    if (valid_code(code.clone()) == false) {
+        let d = push_diag(diags, line_no, "bad_code", "code must be 1..=64 lowercase ASCII letters")
+        lines.push(raw.move)
+        kinds.push(0)
+        return 1
+    }
+    let w = parse_weight(wt)
+    is w {
+        Some(n) -> {
+            let at = lines.len()
+            let e = Entry(text, code, n, at)
+            entries.push(e.move)
+            lines.push(raw.move)
+            kinds.push(1)
+            return 0
+        }
+        None -> {
+            let d = push_diag(diags, line_no, "bad_weight", "weight must be an integer in 1..=1000000")
+            lines.push(raw.move)
+            kinds.push(0)
+            return 1
+        }
+    }
+}
+
+fn parse_walk(
+    rest List<Str>,
+    lines List<Str>,
+    kinds List<int>,
+    entries List<Entry>,
+    diags List<Diag>,
+    line_no int
+) int {
+    if (rest.len() == 0) {
+        return 0
+    }
+    let raw0 Str = rest.remove(0)
+    let stripped = strip_cr(raw0)
+    let rc = push_line(lines, kinds, entries, diags, stripped, line_no)
+    if (rc != 0) {
+        return 1
+    }
+    return parse_walk(rest, lines, kinds, entries, diags, line_no + 1)
+}
+
+pub fn snapshot(lines List<Str>, kinds List<int>, entries List<Entry>, ok int) Snapshot {
+    return Snapshot(lines, kinds, entries, ok)
+}
+
+/// Parse a source text. `ok` is 0 when a line was rejected; the first
+/// diagnostic is in `diags` (callers report it and stop).
+pub fn parse_source(content Str, diags List<Diag>) Snapshot {
+    let raw = List<Str>.new()
+    let kinds = List<int>.new()
+    let entries = List<Entry>.new()
+    let rest = lines(content)
+    let rc = parse_walk(rest, raw, kinds, entries, diags, 1)
+    if (rc != 0) {
+        return Snapshot(raw, kinds, entries, 0)
+    }
+    return Snapshot(raw, kinds, entries, 1)
+}
+
+// ---------------------------------------------------------------------------
+// Mutation (consume-and-rebuild)
+// ---------------------------------------------------------------------------
+
+/// Index of the first entry with (code,text) in `entries`, or -1. The list is
+/// preserved (elements are taken and put back).
+fn find_entry(entries List<Entry>, code Str, text Str, i int) int {
+    if (i >= entries.len()) {
+        return -1
+    }
+    let e = take_entry(entries, i)
+    if (e.code == code) {
+        if (e.text == text) {
+            return i
+        }
+    }
+    return find_entry(entries, code.clone(), text.clone(), i + 1)
+}
+
+fn upsert_walk(
+    rest List<Entry>,
+    out List<Entry>,
+    code Str,
+    text Str,
+    weight int,
+    state List<int>
+) int {
+    if (rest.len() == 0) {
+        return 0
+    }
+    let e = rest.remove(0)
+    if (e.code == code) {
+        if (e.text == text) {
+            let seen = take_int(state, 0)
+            if (seen == 0) {
+                set_cell(state, 0, 1)
+                let old = take_int(state, 1)
+                if (e.weight != weight) {
+                    set_cell(state, 1, 1)
+                } else {
+                    set_cell(state, 1, old)
+                }
+                let ne = Entry(e.text, e.code, weight, e.at)
+                out.push(ne.move)
+            } else {
+                set_cell(state, 1, 1)
+            }
+            return upsert_walk(rest, out, code.clone(), text.clone(), weight, state)
+        }
+    }
+    out.push(e.move)
+    return upsert_walk(rest, out, code.clone(), text.clone(), weight, state)
+}
+
+/// Apply an (code,text,weight) upsert. Existing entries with the same key are
+/// merged into the first one (duplicate later rows dropped); a missing key is
+/// appended with at = -1. state[0] = seen, state[1] = changed. Returns the
+/// rebuilt entry list.
+pub fn upsert(entries List<Entry>, code Str, text Str, weight int, state List<int>) List<Entry> {
+    let out = List<Entry>.new()
+    let d = upsert_walk(entries, out, code.clone(), text.clone(), weight, state)
+    if (take_int(state, 0) == 0) {
+        let e = Entry(text.clone(), code.clone(), weight, -1)
+        out.push(e.move)
+        set_cell(state, 1, 1)
+    }
+    return out
+}
+
+fn remove_walk(rest List<Entry>, out List<Entry>, code Str, text Str, state List<int>) int {
+    if (rest.len() == 0) {
+        return 0
+    }
+    let e = rest.remove(0)
+    if (e.code == code) {
+        if (e.text == text) {
+            set_cell(state, 0, 1)
+            set_cell(state, 1, 1)
+            return remove_walk(rest, out, code.clone(), text.clone(), state)
+        }
+    }
+    out.push(e.move)
+    return remove_walk(rest, out, code.clone(), text.clone(), state)
+}
+
+/// Drop every entry with (code,text). state[0] = 1 when something was removed.
+pub fn remove_key(entries List<Entry>, code Str, text Str, state List<int>) List<Entry> {
+    let out = List<Entry>.new()
+    let d = remove_walk(entries, out, code.clone(), text.clone(), state)
+    return out
+}
+
+// ---------------------------------------------------------------------------
+// Queries and serialization
+// ---------------------------------------------------------------------------
+
+fn format_entry(e Entry) Str {
+    return e.text + "\t" + e.code + "\t" + from_int(e.weight)
+}
+
+fn entry_index_at(entries List<Entry>, at int, i int) int {
+    if (i >= entries.len()) {
+        return -1
+    }
+    let e = take_entry(entries, i)
+    if (e.at == at) {
+        return i
+    }
+    return entry_index_at(entries, at, i + 1)
+}
+
+fn emit_walk(
+    lines List<Str>,
+    kinds List<int>,
+    entries List<Entry>,
+    out List<Str>,
+    i int,
+    upto int
+) int {
+    if (i >= upto) {
+        return 0
+    }
+    let raw = take_str(lines, i)
+    let kind = take_int(kinds, i)
+    if (kind == 0) {
+        out.push(raw.move)
+        return emit_walk(lines, kinds, entries, out, i + 1, upto)
+    }
+    let ei = entry_index_at(entries, i, 0)
+    if (ei >= 0) {
+        let e = take_entry(entries, ei)
+        let line = format_entry(e)
+        out.push(line.move)
+    }
+    return emit_walk(lines, kinds, entries, out, i + 1, upto)
+}
+
+fn push_pending(entries List<Entry>, out List<Str>, i int) int {
+    if (i >= entries.len()) {
+        return 0
+    }
+    let e = take_entry(entries, i)
+    if (e.at < 0) {
+        let line = format_entry(e)
+        out.push(line.move)
+    }
+    return push_pending(entries, out, i + 1)
+}
+
+fn join_walk(lines List<Str>, started int, acc Str) Str {
+    if (lines.len() == 0) {
+        return acc
+    }
+    let l Str = lines.remove(0)
+    if (started == 0) {
+        return join_walk(lines, 1, l.move)
+    }
+    return join_walk(lines, 1, acc + "\n" + l)
+}
+
+/// Serialize the snapshot: untouched source lines keep their exact bytes and
+/// order; touched entries are rewritten in place; new entries are appended
+/// before a trailing empty line. Joining with LF reproduces the source text
+/// exactly (lines() yields a trailing empty element for a final newline).
+pub fn serialize(snap Snapshot) Str {
+    let out = List<Str>.new()
+    let n = snap.lines.len()
+    var trailing_empty = 0
+    if (n > 0) {
+        let last = take_str(snap.lines, n - 1)
+        if (last.len() == 0) {
+            trailing_empty = 1
+        }
+    }
+    let upto = n - trailing_empty
+    let d1 = emit_walk(snap.lines, snap.kinds, snap.entries, out, 0, upto)
+    let d2 = push_pending(snap.entries, out, 0)
+    if (trailing_empty == 1) {
+        out.push("")
+    }
+    let n_out = out.len()
+    if (n_out == 0) {
+        return ""
+    }
+    let last = take_str(out, n_out - 1)
+    if (last.len() > 0) {
+        out.push("")
+    }
+    return join_walk(out, 0, "")
+}
+
+/// Serialize only the live entries (export format: TSV data rows in source
+/// order, one LF after each row).
+pub fn export_entries(entries List<Entry>) Str {
+    let out = List<Str>.new()
+    let d = push_pending_all(entries, out, 0)
+    if (out.len() == 0) {
+        return ""
+    }
+    let body = join_walk(out, 0, "")
+    return body + "\n"
+}
+
+fn push_pending_all(entries List<Entry>, out List<Str>, i int) int {
+    if (i >= entries.len()) {
+        return 0
+    }
+    let e = take_entry(entries, i)
+    let line = format_entry(e)
+    out.push(line.move)
+    return push_pending_all(entries, out, i + 1)
+}
+
+/// Number of live entries in a parsed snapshot.
+/// Lines joined with LF (the request-file shape). Consumes the list.
+pub fn join_lines(lines List<Str>) Str {
+    if (lines.len() == 0) {
+        return ""
+    }
+    let body = join_walk(lines, 0, "")
+    return body + "\n"
+}
+
+/// Owned element access for callers that must inspect a list twice.
+pub fn take_entry_at(xs List<Entry>, i int) Entry {
+    return take_entry(xs, i)
+}
+
+pub fn live_count(snap Snapshot) int {
+    return snap.entries.len()
+}

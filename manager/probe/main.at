@@ -1,0 +1,76 @@
+// PLAN-072 T-01 probe: proves the AV chain the manager depends on.
+//
+// Invocation (through bin/autoime-config.exe or scripts/run.ps1):
+//   <exe> roundtrip <in-file> <out-file>   argv -> Chinese/emoji file read ->
+//                                          atomic write -> console -> exit 0
+//   <exe> spawn7                           child exit code is seen through
+//                                          std.process.spawn5 (python exits 7)
+//   <exe> deploy <autoime_deploy.exe>      spawn the real deploy tool and
+//                                          report its status
+//   <exe> exit3                            non-zero status propagation
+//
+// The probe is not shipped in the product package; it is the T-01 acceptance
+// program and the seed of the T-02/T-05 runner.
+
+use std.process.args
+use std.process.spawn5
+use std.file.read_text
+use std.file.write_text
+use std.file.replace_atomic
+
+fn main() int {
+    var argv = args()
+    say("probe-t01")
+    if (argv.len() < 2) {
+        return 3
+    }
+    let mode = argv.remove(1)
+    if (mode.clone() == "exit3") {
+        return 3
+    }
+    if (mode.clone() == "spawn7") {
+        let code = spawn5("python", "-c", "import sys;sys.exit(7)", "", "", 10000)
+        if (code == 7) {
+            say("spawn-code-7")
+            return 0
+        }
+        say("spawn-unexpected")
+        return 9
+    }
+    if (mode.clone() == "deploy") {
+        if (argv.len() != 2) {
+            return 4
+        }
+        let deploy = argv.remove(1)
+        let code = spawn5(deploy, "", "", "", "", 120000)
+        if (code == 0) {
+            say("deploy-ok")
+            return 0
+        }
+        say("deploy-failed")
+        return 20 + code
+    }
+    if (mode.clone() == "roundtrip") {
+        if (argv.len() != 3) {
+            return 5
+        }
+        let in_path = argv.remove(1)
+        let out_path = argv.remove(1)
+        let text = read_text(in_path)
+        if (text.len() == 0) {
+            say("read-empty")
+            return 6
+        }
+        let stage = out_path.clone() + ".tmp"
+        if (write_text(stage.clone(), text.clone()) != 0) {
+            return 7
+        }
+        if (replace_atomic(stage, out_path) != 0) {
+            return 8
+        }
+        say(text)
+        return 0
+    }
+    say("unknown-mode")
+    return 2
+}

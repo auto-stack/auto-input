@@ -1,0 +1,30 @@
+{
+  "format": "autoime-cases@1",
+  "schema": "autoime_pinyin",
+  "note": "PLAN-078 T-01/T-05 英文别名准入语料（AC-01，probe --cases 消费）。固定前置与 cases.json 相同：librime 1.13.1（rime.dll SHA-256 2D8F1BC3...C45B）+ 朙月共享数据 + shared/resources 本版本 + 全新空用户目录。断言分四类：①单字母/短前缀不得召回英文别名（expect_absent + scan=true 检查整表，V-01「SQLite 全表缺席」）；②完整小写别名码继续命中（sqlite/ros/autoos/tsf）；③显式大小写触发码逐字符匹配：`SQ`、`SQLite` 命中 SQLite，`Sq`/`Sql`/`Sqlite`/`sqlITE`/`S`/`sq`/`sql` 都不命中；④普通中文控制（是/nihao/nh/shuruf）不回归。大写输入按生产 KeyRouter 的实际路径回放（大写 keysym + Shift mask）。",
+  "cases": [
+    { "id": "en-s-single", "keys": "s", "scan": true, "expect_first": "是", "expect_absent": "SQLite" },
+    { "id": "en-sq-short", "keys": "sq", "scan": true, "expect_absent": "SQLite" },
+    { "id": "en-sql-short", "keys": "sql", "scan": true, "expect_absent": "SQLite" },
+    { "id": "en-sql-upper-mixed", "keys": "Sql", "scan": true, "expect_absent": "SQLite" },
+
+    { "id": "en-sqlite-full", "keys": "sqlite", "expect_first": "SQLite" },
+    { "id": "en-SQ-explicit", "keys": "SQ", "expect_first": "SQLite" },
+    { "id": "en-sqlite-mixed-case-absent", "keys": "Sqlite", "scan": true, "expect_absent": "SQLite" },
+    { "id": "en-sqlite-lower-tail-absent", "keys": "sqlITE", "scan": true, "expect_absent": "SQLite" },
+    { "id": "en-SQLite-explicit", "keys": "SQLite", "expect_first": "SQLite" },
+    { "id": "en-ros-full", "keys": "ros", "expect_first": "ROS 2" },
+    { "id": "en-autoos-full", "keys": "autoos", "expect_first": "AutoOS" },
+    { "id": "en-tsf-full", "keys": "tsf", "expect_first": "TSF" },
+    { "id": "en-autoscape-absent", "keys": "autoscape", "scan": true, "expect_absent": "AutoScape" },
+
+    { "id": "en-S-upper", "keys": "S", "scan": true, "expect_absent": "SQLite" },
+    { "id": "en-Sq-upper-mixed", "keys": "Sq", "scan": true, "expect_absent": "SQLite" },
+
+    { "id": "ctl-shi", "keys": "shi", "scan": true, "expect_first": "是" },
+    { "id": "ctl-shide", "keys": "shide", "scan": true, "expect_first": "是的" },
+    { "id": "ctl-nihao", "keys": "nihao", "expect_first": "你好" },
+    { "id": "ctl-nh", "keys": "nh", "expect_top5": "你好" },
+    { "id": "ctl-shuruf", "keys": "shuruf", "expect_top5": "输入法" }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "format": "autoime-cases@1",
+  "schema": "autoime_pinyin",
+  "note": "PLAN-078 T-05 个人英文术语语料（V-05 引擎段，由 windows/ime/tests/run-t05.ps1 预置）。前置：用户目录内的 autoime_user_terms.dict.yaml 含 AutoScape<tab>AS<tab>1500 与 AutoScape<tab>SQ<tab>1500（后者覆盖内置 SQ→SQLite）。断言：显式个人码逐字符命中且大小写敏感（AS 命中、as/As/A 不命中）；个人码优先于内置别名；既有中文与内置别名不回归。空用户目录直接跑本文件会在 ut-AS-first 失败，属预期（必须先预置个人术语）。",
+  "cases": [
+    { "id": "ut-AS-first", "keys": "AS", "expect_first": "AutoScape" },
+    { "id": "ut-AS-followed-by-builtin", "keys": "SQ", "expect_first": "AutoScape", "expect_top5": "SQLite" },
+    { "id": "ut-as-absent", "keys": "as", "scan": true, "expect_absent": "AutoScape" },
+    { "id": "ut-As-absent", "keys": "As", "scan": true, "expect_absent": "AutoScape" },
+    { "id": "ut-A-absent", "keys": "A", "scan": true, "expect_absent": "AutoScape" },
+    { "id": "ut-builtin-sqlite", "keys": "sqlite", "expect_first": "SQLite" },
+    { "id": "ut-builtin-autoos", "keys": "autoos", "expect_first": "AutoOS" },
+    { "id": "ut-chinese-yes", "keys": "s", "expect_first": "是" }
+  ]
+}

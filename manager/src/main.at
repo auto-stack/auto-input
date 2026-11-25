@@ -1,0 +1,1083 @@
+// main.at — AutoIME user-phrase manager CLI (PLAN-072 T-02).
+//
+// Surface (docs/specs/autoime/phrase-management.md, SD-01):
+//   autoime-config phrases list   [--user-data-dir D]
+//   autoime-config phrases add    --code C --text T [--weight W] [--user-data-dir D]
+//   autoime-config phrases remove --code C --text T [--user-data-dir D]
+//   autoime-config phrases import --file F [--user-data-dir D]
+//   autoime-config phrases export --file F [--user-data-dir D]
+//   autoime-config deploy         [--user-data-dir D]
+//
+// Exit status: 0 ok (including idempotent no-ops), 2 usage, 3 invalid data
+// (line diagnostics, whole batch refused), 4 I/O, 5 conflict (T-03),
+// 6 deploy failure (T-03). Diagnostics never echo phrase text or codes:
+// only line numbers, kinds and counts.
+//
+// The default data directory is %LOCALAPPDATA%\AutoIME\rime, overridable by
+// AUTOIME_RIME_USER_DATA_DIR and --user-data-dir. Writes are staged in the
+// same directory, identity-checked, then replaced atomically; a failed write
+// keeps the previous file.
+
+use std.process.args
+use std.process.spawn5
+use std.env.get
+use std.file.exists
+use std.file.read_bytes
+use std.file.write_text
+use std.file.replace_atomic
+use std.file.delete
+use std.file.append_text
+use std.bytes.decode_utf8
+use std.bytes.byte_hash
+use std.path.join
+use std.text.substr
+use std.conv.from_int
+use std.conv.from_u64
+use std.time.now_ms
+use app.phrases.parse_source
+use app.phrases.join_lines
+use app.phrases.take_entry_at
+use app.phrases.snapshot
+use app.phrases.serialize
+use app.phrases.upsert
+use app.phrases.remove_key
+use app.phrases.export_entries
+use app.phrases.strip_cr
+use app.phrases.valid_code
+use app.phrases.valid_text
+use app.phrases.parse_weight
+use app.phrases.Diag
+use app.phrases.Entry
+use app.phrases.Snapshot
+use app.terms.Term
+use app.terms.TermDiag
+use app.terms.valid_term_code
+use app.terms.parse_terms
+use app.terms.serialize_terms
+use app.terms.upsert_terms
+use app.terms.remove_term
+use app.terms.export_terms
+use app.terms.term_line
+use app.terms.term_code
+use app.terms.term_is_placeholder
+use app.terms.placeholder_code
+use app.terms.take_term_at
+use app.terms.terms_count
+
+type Loaded {
+    kind int
+    content Str  // BOM-free text used for parsing
+    raw Str      // exact UTF-8 bytes read (the native source snapshot)
+}
+
+// ---------------------------------------------------------------------------
+// argv helpers (consume a fresh args() list each call; never a view)
+// ---------------------------------------------------------------------------
+
+fn nth_walk(xs List<Str>, want int, k int) Str {
+    if (xs.len() == 0) {
+        return ""
+    }
+    let v Str = xs.remove(0)
+    if (k == want) {
+        return v
+    }
+    return nth_walk(xs, want, k + 1)
+}
+
+fn nth(want int) Str {
+    return nth_walk(args(), want, 0)
+}
+
+fn flag_walk(xs List<Str>, name Str, prev Str) ?Str {
+    if (xs.len() == 0) {
+        return None
+    }
+    let v Str = xs.remove(0)
+    if (prev == name) {
+        return Some(v)
+    }
+    return flag_walk(xs, name, v)
+}
+
+fn flag(name Str) ?Str {
+    return flag_walk(args(), name, "")
+}
+
+fn has_flag(name Str) int {
+    let f = flag(name)
+    is f {
+        Some(v) -> { return 1 }
+        None -> { return 0 }
+    }
+}
+
+fn is_value_opt(s Str) bool {
+    if (s == "--user-data-dir") { return true }
+    if (s == "--code") { return true }
+    if (s == "--text") { return true }
+    if (s == "--weight") { return true }
+    if (s == "--file") { return true }
+    return false
+}
+
+/// N-02: model the option grammar as a token scan. Every value option consumes
+/// exactly the next token (even when that token looks like an option, so a
+/// phrase text such as "--file" stays legal); a missing or empty value is a
+/// usage error instead of a silent fallback to the default profile.
+fn scan_dangling(rest List<Str>) Str {
+    if (rest.len() == 0) {
+        return ""
+    }
+    let tok = rest.remove(0)
+    if (is_value_opt(tok.clone()) == false) {
+        return scan_dangling(rest)
+    }
+    if (rest.len() == 0) {
+        return tok
+    }
+    let val = rest.remove(0)
+    if (val.len() == 0) {
+        return tok
+    }
+    return scan_dangling(rest)
+}
+
+// ---------------------------------------------------------------------------
+// Paths and file access
+// ---------------------------------------------------------------------------
+
+fn user_dir() Str {
+    let fu = flag("--user-data-dir")
+    is fu {
+        Some(v) -> {
+            if (v.len() > 0) {
+                return v
+            }
+        }
+        None -> {}
+    }
+    let envd = get("AUTOIME_RIME_USER_DATA_DIR")
+    if (envd.len() > 0) {
+        return envd
+    }
+    let local = get("LOCALAPPDATA")
+    if (local.len() == 0) {
+        return ""
+    }
+    let root = join(local, "AutoIME")
+    return join(root, "rime")
+}
+
+fn phrase_path(dir Str) Str {
+    return join(dir.clone(), "custom_phrase.txt")
+}
+
+fn strip_bom(s Str) Str {
+    if (s.len() == 0) {
+        return ""
+    }
+    let n = s.len()
+    if (s.char_at(0).to_codepoint() == 65279) {
+        return substr(s, 1, n - 1)
+    }
+    return s.clone()
+}
+
+/// Strict read: 0 = present content, 1 = missing file, 2 = read/UTF-8 error.
+fn load_file(path Str) Loaded {
+    if (exists(path.clone()) == false) {
+        return Loaded(1, "", "")
+    }
+    var out = Loaded(2, "", "")
+    let rb = read_bytes(path.clone())
+    is rb {
+        Some(bytes) -> {
+            let text = decode_utf8(bytes)
+            is text {
+                Some(v) -> {
+                    let stripped = strip_bom(v.clone())
+                    out = Loaded(0, stripped, v)
+                }
+                None -> {}
+            }
+        }
+        None -> {}
+    }
+    return out
+}
+
+/// Stage -> identity-check -> atomic replace. 0 ok, 1 write, 2 verify,
+/// 3 replace. A failure leaves the previous target untouched.
+fn write_atomic(path Str, content Str) int {
+    let stage = path.clone() + ".autoime-staged"
+    if (write_text(stage.clone(), content.clone()) != 0) {
+        return 1
+    }
+    let rb = read_bytes(stage.clone())
+    is rb {
+        Some(bytes) -> {
+            let text = decode_utf8(bytes)
+            is text {
+                Some(v) -> {
+                    if (byte_hash(v) != byte_hash(content.clone())) {
+                        return 2
+                    }
+                    if (replace_atomic(stage, path) != 0) {
+                        return 3
+                    }
+                    return 0
+                }
+                None -> { return 2 }
+            }
+        }
+        None -> { return 2 }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics
+// ---------------------------------------------------------------------------
+
+fn fail(code int, msg Str) int {
+    eprint("autoime-config: " + msg + "\n")
+    return code
+}
+
+fn usage() int {
+    eprint("usage: autoime-config phrases list|add|remove|import|export [options]\n")
+    eprint("       autoime-config terms list|add|remove|import|export [options]\n")
+    eprint("       autoime-config deploy\n")
+    eprint("options: --code C --text T --weight W --file F --user-data-dir D\n")
+    return 2
+}
+
+fn report_diag(diags List<Diag>) int {
+    if (diags.len() == 0) {
+        return 0
+    }
+    let d = diags.remove(0)
+    let msg = "line " + from_int(d.line) + ": " + d.kind.clone() + ": " + d.detail.clone()
+    return fail(3, msg)
+}
+
+fn io_error(path Str, kind int) int {
+    if (kind == 1) {
+        return fail(4, "input file not found")
+    }
+    return fail(4, "cannot read file")
+}
+
+// ---------------------------------------------------------------------------
+// Output
+// ---------------------------------------------------------------------------
+
+fn print_entries(rest List<Entry>) int {
+    if (rest.len() == 0) {
+        return 0
+    }
+    let e = rest.remove(0)
+    say(e.text + "\t" + e.code + "\t" + from_int(e.weight))
+    return print_entries(rest)
+}
+
+// ---------------------------------------------------------------------------
+// Mutating commands
+// ---------------------------------------------------------------------------
+
+fn take_state(state List<int>) int {
+    let v = state.remove(1)
+    state.insert(1, v)
+    return v
+}
+
+// ---------------------------------------------------------------------------
+// Phrase transaction plumbing (PLAN-072 T-03)
+//
+// The Auto side owns phrase semantics and staging; the native tool owns the
+// deployment lock, source re-check, backup/publish, Rime maintenance, the new
+// session verification and crash recovery. The request is a UTF-8 key/value
+// file (no shell quoting, no phrase text on the command line). Every
+// transaction uses a content-derived token in its file names so two manager
+// processes never clobber each other's staging files.
+// ---------------------------------------------------------------------------
+
+fn verify_body_one(mode Str, code Str, text Str) Str {
+    return mode.clone() + "\t" + code.clone() + "\t" + text.clone() + "\n"
+}
+
+fn verify_body_import(entries List<Entry>, i int, count int, acc Str) Str {
+    if (i >= entries.len()) {
+        return acc
+    }
+    if (count >= 8) {
+        return acc
+    }
+    let e = take_entry_at(entries, i)
+    let row = "present\t" + e.code.clone() + "\t" + e.text.clone() + "\n"
+    return verify_body_import(entries, i + 1, count + 1, acc + row)
+}
+
+fn txn_token(content Str) Str {
+    // R-06 repair: a per-run time nonce on top of the content hash, so two
+    // manager processes running the same command never share staging files.
+    let h = byte_hash(content)
+    let t = now_ms()
+    return from_u64(h.to(u64)) + "-" + from_u64(t.to(u64))
+}
+
+fn cleanup_txn(staged Str, source Str, verify Str, req Str) int {
+    let d1 = delete(staged)
+    let d2 = delete(source)
+    if (verify.len() > 0) {
+        let d3 = delete(verify)
+    }
+    let d4 = delete(req)
+    return 0
+}
+
+fn apply_content(user_dir Str, target Str, missing int, raw Str, content Str, verify_body Str) int {
+    let deploy = deploy_exe()
+    if (deploy.len() == 0) {
+        return fail(4, "deploy tool not found (set AUTOIME_DEPLOY_EXE)")
+    }
+    // N-05 repair: a stale/relative AUTOIME_DEPLOY_EXE must be a named
+    // preparation failure, not a spawn that degrades into status -1.
+    if (exists(deploy.clone()) == false) {
+        return fail(4, "deploy tool not found at the configured path (set AUTOIME_DEPLOY_EXE)")
+    }
+    let token = txn_token(content.clone())
+    let staged = join(user_dir.clone(), ".autoime-staged-" + token.clone() + ".txt")
+    let source = join(user_dir.clone(), ".autoime-source-" + token.clone() + ".txt")
+    let verify = join(user_dir.clone(), ".autoime-verify-" + token.clone() + ".txt")
+    let req = join(user_dir.clone(), ".autoime-apply-" + token.clone() + ".req")
+    if (write_text(staged.clone(), content) != 0) {
+        return fail(4, "cannot stage phrase file")
+    }
+    let lines = List<Str>.new()
+    lines.push("user=" + user_dir.clone())
+    if (missing == 1) {
+        lines.push("source_missing=1")
+    } else {
+        if (write_text(source.clone(), raw) != 0) {
+            let c0 = cleanup_txn(staged.clone(), source.clone(), "", req.clone())
+            return fail(4, "cannot stage source snapshot")
+        }
+        lines.push("source=" + source.clone())
+        lines.push("source_missing=0")
+    }
+    lines.push("staged=" + staged.clone())
+    if (verify_body.len() > 0) {
+        if (write_text(verify.clone(), verify_body) != 0) {
+            let c1 = cleanup_txn(staged.clone(), source.clone(), "", req.clone())
+            return fail(4, "cannot stage verification")
+        }
+        lines.push("verify=" + verify.clone())
+    }
+    lines.push("timeout_ms=2000")
+    let body = join_lines(lines)
+    if (write_text(req.clone(), body) != 0) {
+        let c2 = cleanup_txn(staged.clone(), source.clone(), verify.clone(), req.clone())
+        return fail(4, "cannot write transaction request")
+    }
+    let code = spawn5(deploy, "phrases", "apply", "--request", req.clone(), 120000)
+    let c3 = cleanup_txn(staged.clone(), source.clone(), verify.clone(), req.clone())
+    if (code == 0) {
+        return 0
+    }
+    if (code == 5) {
+        return fail(5, "phrase file changed concurrently; re-read and retry")
+    }
+    if (code == 7) {
+        return fail(7, "deployment busy; retry")
+    }
+    if (code == 6) {
+        return fail(6, "deployment failed; the previous phrase file was restored")
+    }
+    if (code == 4) {
+        return fail(4, "phrase transaction could not start")
+    }
+    return fail(6, "phrase transaction failed with status " + from_int(code))
+}
+
+fn commit_phrase(
+    user_dir Str,
+    target Str,
+    snap Snapshot,
+    entries List<Entry>,
+    state List<int>,
+    missing int,
+    raw Str,
+    verify_body Str
+) int {
+    let changed = take_state(state)
+    if (changed == 0) {
+        return 0
+    }
+    let next = snapshot(snap.lines, snap.kinds, entries, 1)
+    let content = serialize(next)
+    return apply_content(user_dir, target, missing, raw, content, verify_body)
+}
+
+fn run_add(target Str, dir Str, code Str, text Str, weight int) int {
+    let L = load_file(target.clone())
+    let load_kind = L.kind
+    let content = L.content
+    let raw = L.raw
+    if (load_kind == 2) {
+        return fail(4, "cannot read phrase file")
+    }
+    let diags = List<Diag>.new()
+    let snap = parse_source(content, diags)
+    if (snap.ok == 0) {
+        return report_diag(diags)
+    }
+    let vbody = verify_body_one("present", code.clone(), text.clone())
+    let state = List<int>.new()
+    state.push(0)
+    state.push(0)
+    let entries = upsert(snap.entries, code, text, weight, state)
+    var missing = 0
+    if (load_kind == 1) {
+        missing = 1
+    }
+    return commit_phrase(dir, target, snap, entries, state, missing, raw, vbody)
+}
+
+fn run_remove(target Str, dir Str, code Str, text Str) int {
+    let L = load_file(target.clone())
+    let load_kind = L.kind
+    let content = L.content
+    let raw = L.raw
+    if (load_kind == 2) {
+        return fail(4, "cannot read phrase file")
+    }
+    let diags = List<Diag>.new()
+    let snap = parse_source(content, diags)
+    if (snap.ok == 0) {
+        return report_diag(diags)
+    }
+    let vbody = verify_body_one("absent", code.clone(), text.clone())
+    let state = List<int>.new()
+    state.push(0)
+    state.push(0)
+    let entries = remove_key(snap.entries, code, text, state)
+    var missing = 0
+    if (load_kind == 1) {
+        missing = 1
+    }
+    return commit_phrase(dir, target, snap, entries, state, missing, raw, vbody)
+}
+
+fn apply_import(rest List<Entry>, entries List<Entry>, state List<int>) List<Entry> {
+    if (rest.len() == 0) {
+        return entries
+    }
+    let e = rest.remove(0)
+    let next = upsert(entries, e.code.clone(), e.text.clone(), e.weight, state)
+    return apply_import(rest, next, state)
+}
+
+fn run_import(target Str, dir Str, file Str) int {
+    let imp = load_file(file.clone())
+    if (imp.kind != 0) {
+        return io_error(file, imp.kind)
+    }
+    let idia = List<Diag>.new()
+    let isrc = parse_source(imp.content, idia)
+    if (isrc.ok == 0) {
+        return report_diag(idia)
+    }
+    let L = load_file(target.clone())
+    let load_kind = L.kind
+    let content = L.content
+    let raw = L.raw
+    if (load_kind == 2) {
+        return fail(4, "cannot read phrase file")
+    }
+    let diags = List<Diag>.new()
+    let snap = parse_source(content, diags)
+    if (snap.ok == 0) {
+        return report_diag(diags)
+    }
+    let vbody = verify_body_import(isrc.entries, 0, 0, "")
+    let state = List<int>.new()
+    state.push(0)
+    state.push(0)
+    let merged = apply_import(isrc.entries, snap.entries, state)
+    var missing = 0
+    if (load_kind == 1) {
+        missing = 1
+    }
+    return commit_phrase(dir, target, snap, merged, state, missing, raw, vbody)
+}
+
+fn run_export(target Str, file Str) int {
+    let L = load_file(target.clone())
+    if (L.kind == 2) {
+        return fail(4, "cannot read phrase file")
+    }
+    let diags = List<Diag>.new()
+    let snap = parse_source(L.content, diags)
+    if (snap.ok == 0) {
+        return report_diag(diags)
+    }
+    let content = export_entries(snap.entries)
+    let rc = write_atomic(file, content)
+    if (rc == 0) {
+        return 0
+    }
+    return fail(4, "cannot write export file (stage " + from_int(rc) + ")")
+}
+
+// ---------------------------------------------------------------------------
+// Entry
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Personal English terms (PLAN-078 T-05)
+//
+// The manager owns <user data dir>\autoime_user_terms.dict.yaml: it validates
+// and rewrites it canonically, then asks the native deploy tool to recompile
+// the table (which routes through the running engine owner when there is one).
+// Codes are 2..=32 ASCII letters and case-sensitive; the commit text keeps its
+// own case. A failed deployment restores the previous file byte-for-byte.
+// ---------------------------------------------------------------------------
+
+fn terms_path(dir Str) Str {
+    return join(dir.clone(), "autoime_user_terms.dict.yaml")
+}
+
+fn terms_resources() Str {
+    let e = get("AUTOIME_RESOURCES_DIR")
+    if (e.len() > 0) {
+        return e
+    }
+    let install = get("AUTOIME_INSTALL_DIR")
+    if (install.len() > 0) {
+        return join(install, "resources")
+    }
+    return ""
+}
+
+fn report_term_diag(diags List<TermDiag>) int {
+    if (diags.len() == 0) {
+        return 0
+    }
+    let d = diags.remove(0)
+    return fail(3, "line " + from_int(d.line) + ": " + d.kind.clone() + ": " + d.detail.clone())
+}
+
+fn take_cell(cell List<int>, i int) int {
+    let v = cell.remove(i)
+    cell.insert(i, v)
+    return v
+}
+
+fn reload_terms(dir Str) int {
+    let exe = deploy_exe()
+    if (exe.len() == 0) {
+        return fail(4, "deploy tool not found (set AUTOIME_DEPLOY_EXE)")
+    }
+    if (exists(exe.clone()) == false) {
+        return fail(4, "deploy tool not found at the configured path (set AUTOIME_DEPLOY_EXE)")
+    }
+    let code = spawn5(exe, "--user-data-dir", dir.clone(), "", "", 180000)
+    if (code == 0) {
+        return 0
+    }
+    return fail(6, "deployment failed; the previous personal term file was restored")
+}
+
+fn commit_terms(dir Str, prev Loaded, content Str) int {
+    let path = terms_path(dir.clone())
+    let rc = write_atomic(path.clone(), content)
+    if (rc != 0) {
+        return fail(4, "cannot write personal terms file (stage " + from_int(rc) + ")")
+    }
+    let code = reload_terms(dir.clone())
+    if (code == 0) {
+        return 0
+    }
+    if (prev.kind == 0) {
+        let d = write_atomic(path, prev.raw.clone())
+        return code
+    }
+    let d = delete(path)
+    return code
+}
+
+fn load_personal_terms(dir Str, diags List<TermDiag>) Loaded {
+    let L = load_file(terms_path(dir.clone()))
+    if (L.kind != 0) {
+        return L
+    }
+    let parsed = parse_terms(L.content.clone(), diags)
+    if (diags.len() > 0) {
+        return L
+    }
+    return L
+}
+
+fn print_term_rows(terms List<Term>, i int, source Str) int {
+    if (i >= terms.len()) {
+        return 0
+    }
+    // The shipped placeholder keeps an empty table compilable; it is not user
+    // data and is hidden from the listing.
+    if (term_is_placeholder(terms, i) == false) {
+        say(term_line(terms, i) + "\t" + source)
+    }
+    return print_term_rows(terms, i + 1, source)
+}
+
+fn has_term_code(terms List<Term>, code Str, i int) int {
+    if (i >= terms.len()) {
+        return 0
+    }
+    if (term_code(terms, i) == code) {
+        return 1
+    }
+    return has_term_code(terms, code.clone(), i + 1)
+}
+
+fn print_builtin_rows(terms List<Term>, personal List<Term>, i int) int {
+    if (i >= terms.len()) {
+        return 0
+    }
+    let code = term_code(terms, i)
+    if (has_term_code(personal, code.clone(), 0) == 0) {
+        say(term_line(terms, i) + "\tbuiltin")
+    }
+    return print_builtin_rows(terms, personal, i + 1)
+}
+
+fn run_terms_list(dir Str) int {
+    let pd = List<TermDiag>.new()
+    let L = load_personal_terms(dir.clone(), pd)
+    if (L.kind == 2) {
+        return fail(4, "cannot read personal terms file")
+    }
+    if (pd.len() > 0) {
+        return report_term_diag(pd)
+    }
+    var personal = List<Term>.new()
+    if (L.kind == 0) {
+        let d2 = List<TermDiag>.new()
+        personal = parse_terms(L.content.clone(), d2)
+    }
+    let rc = print_term_rows(personal, 0, "personal")
+    let res = terms_resources()
+    if (res.len() == 0) {
+        return 0
+    }
+    let builtin = load_file(join(res, "autoime_en.dict.yaml"))
+    if (builtin.kind != 0) {
+        return 0
+    }
+    let bd = List<TermDiag>.new()
+    let rows = parse_terms(builtin.content, bd)
+    if (bd.len() > 0) {
+        return 0
+    }
+    return print_builtin_rows(rows, personal, 0)
+}
+
+fn run_terms_add(dir Str, code Str, text Str, weight int) int {
+    let L = load_file(terms_path(dir.clone()))
+    if (L.kind == 2) {
+        return fail(4, "cannot read personal terms file")
+    }
+    let diags = List<TermDiag>.new()
+    var terms = List<Term>.new()
+    if (L.kind == 0) {
+        terms = parse_terms(L.content.clone(), diags)
+    }
+    if (diags.len() > 0) {
+        return report_term_diag(diags)
+    }
+    let state = List<int>.new()
+    state.push(0)
+    state.push(0)
+    let next = upsert_terms(terms, code.clone(), text.clone(), weight, state)
+    let changed = take_cell(state, 1)
+    if (changed == 0) {
+        return 0
+    }
+    return commit_terms(dir, L, serialize_terms(next))
+}
+
+fn run_terms_remove(dir Str, code Str, text Str) int {
+    let L = load_file(terms_path(dir.clone()))
+    if (L.kind == 2) {
+        return fail(4, "cannot read personal terms file")
+    }
+    let diags = List<TermDiag>.new()
+    var terms = List<Term>.new()
+    if (L.kind == 0) {
+        terms = parse_terms(L.content.clone(), diags)
+    }
+    if (diags.len() > 0) {
+        return report_term_diag(diags)
+    }
+    let state = List<int>.new()
+    state.push(0)
+    state.push(0)
+    let next = remove_term(terms, code.clone(), text.clone(), state)
+    let changed = take_cell(state, 1)
+    if (changed == 0) {
+        return 0
+    }
+    return commit_terms(dir, L, serialize_terms(next))
+}
+
+fn merge_terms(rest List<Term>, terms List<Term>, state List<int>, i int) List<Term> {
+    if (i >= rest.len()) {
+        return terms
+    }
+    let t = take_term_at(rest, i)
+    if (t.code == placeholder_code()) {
+        return merge_terms(rest, terms, state, i + 1)
+    }
+    let next = upsert_terms(terms, t.code.clone(), t.text.clone(), t.weight, state)
+    return merge_terms(rest, next, state, i + 1)
+}
+
+fn run_terms_import(dir Str, file Str) int {
+    let imp = load_file(file.clone())
+    if (imp.kind != 0) {
+        return io_error(file, imp.kind)
+    }
+    let idia = List<TermDiag>.new()
+    let incoming = parse_terms(imp.content, idia)
+    if (idia.len() > 0) {
+        return report_term_diag(idia)
+    }
+    let L = load_file(terms_path(dir.clone()))
+    if (L.kind == 2) {
+        return fail(4, "cannot read personal terms file")
+    }
+    let diags = List<TermDiag>.new()
+    var terms = List<Term>.new()
+    if (L.kind == 0) {
+        terms = parse_terms(L.content.clone(), diags)
+    }
+    if (diags.len() > 0) {
+        return report_term_diag(diags)
+    }
+    let state = List<int>.new()
+    state.push(0)
+    state.push(0)
+    let merged = merge_terms(incoming, terms, state, 0)
+    let changed = take_cell(state, 1)
+    if (changed == 0) {
+        return 0
+    }
+    return commit_terms(dir, L, serialize_terms(merged))
+}
+
+fn run_terms_export(dir Str, file Str) int {
+    let L = load_file(terms_path(dir.clone()))
+    if (L.kind == 2) {
+        return fail(4, "cannot read personal terms file")
+    }
+    let diags = List<TermDiag>.new()
+    var terms = List<Term>.new()
+    if (L.kind == 0) {
+        terms = parse_terms(L.content, diags)
+    }
+    if (diags.len() > 0) {
+        return report_term_diag(diags)
+    }
+    let content = export_terms(terms)
+    let rc = write_atomic(file, content)
+    if (rc == 0) {
+        return 0
+    }
+    return fail(4, "cannot write export file (stage " + from_int(rc) + ")")
+}
+
+fn run_terms_cmd() int {
+    let sub = nth(2)
+    if (sub.len() == 0) {
+        return usage()
+    }
+    let dir = user_dir()
+    if (dir.len() == 0) {
+        return fail(4, "no user data directory (LOCALAPPDATA unset); pass --user-data-dir")
+    }
+    if (sub.clone() == "list") {
+        return run_terms_list(dir)
+    }
+    if (sub.clone() == "add") {
+        let fc = flag("--code")
+        is fc {
+            Some(code) -> {
+                let ft = flag("--text")
+                is ft {
+                    Some(text) -> {
+                        if (valid_term_code(code.clone()) == false) {
+                            return fail(3, "--code must be 2..=32 ASCII letters (case-sensitive)")
+                        }
+                        if (code == placeholder_code()) {
+                            return fail(3, "--code is reserved for the shipped placeholder")
+                        }
+                        if (valid_text(text.clone()) == false) {
+                            return fail(3, "--text must be 1..=1024 scalars without TAB/CR/LF/NUL")
+                        }
+                        let pw = parse_weight(term_weight())
+                        is pw {
+                            Some(w) -> { return run_terms_add(dir, code, text, w) }
+                            None -> { return fail(3, "--weight must be an integer in 1..=1000000") }
+                        }
+                    }
+                    None -> { return usage() }
+                }
+            }
+            None -> { return usage() }
+        }
+    }
+    if (sub.clone() == "remove") {
+        let fc = flag("--code")
+        is fc {
+            Some(code) -> {
+                let ft = flag("--text")
+                is ft {
+                    Some(text) -> {
+                        if (valid_term_code(code.clone()) == false) {
+                            return fail(3, "--code must be 2..=32 ASCII letters (case-sensitive)")
+                        }
+                        if (code == placeholder_code()) {
+                            return fail(3, "--code is reserved for the shipped placeholder")
+                        }
+                        if (valid_text(text.clone()) == false) {
+                            return fail(3, "--text must be 1..=1024 scalars without TAB/CR/LF/NUL")
+                        }
+                        return run_terms_remove(dir, code, text)
+                    }
+                    None -> { return usage() }
+                }
+            }
+            None -> { return usage() }
+        }
+    }
+    if (sub.clone() == "import") {
+        let ff = flag("--file")
+        is ff {
+            Some(f) -> {
+                if (f.len() == 0) {
+                    return usage()
+                }
+                return run_terms_import(dir, f)
+            }
+            None -> { return usage() }
+        }
+    }
+    if (sub.clone() == "export") {
+        let ff = flag("--file")
+        is ff {
+            Some(f) -> {
+                if (f.len() == 0) {
+                    return usage()
+                }
+                return run_terms_export(dir, f)
+            }
+            None -> { return usage() }
+        }
+    }
+    return usage()
+}
+
+fn term_weight() Str {
+    let fw = flag("--weight")
+    is fw {
+        Some(w) -> {
+            if (w.len() > 0) {
+                return w
+            }
+        }
+        None -> {}
+    }
+    return "1000"
+}
+
+fn main() int {
+    let group = nth(1)
+    if (group.len() == 0) {
+        return usage()
+    }
+    // R-05 repair: an option that needs a value in the last position is a
+    // usage error, never a silent fallback to the default directory.
+    let dangling = scan_dangling(args())
+    if (dangling.len() > 0) {
+        return fail(2, "option " + dangling + " needs a value")
+    }
+    if (group.clone() == "deploy") {
+        return run_deploy()
+    }
+    if (group.clone() == "terms") {
+        return run_terms_cmd()
+    }
+    if (group.clone() != "phrases") {
+        return usage()
+    }
+    let sub = nth(2)
+    if (sub.len() == 0) {
+        return usage()
+    }
+    let dir = user_dir()
+    if (dir.len() == 0) {
+        return fail(4, "no user data directory (LOCALAPPDATA unset); pass --user-data-dir")
+    }
+    let target = phrase_path(dir.clone())
+    if (sub.clone() == "list") {
+        return run_list(target.clone())
+    }
+    if (sub.clone() == "add") {
+        return run_add_cmd(target.clone(), dir.clone())
+    }
+    if (sub.clone() == "remove") {
+        return run_remove_cmd(target.clone(), dir.clone())
+    }
+    if (sub.clone() == "import") {
+        return run_import_cmd(target.clone(), dir.clone())
+    }
+    if (sub.clone() == "export") {
+        return run_export_cmd(target.clone())
+    }
+    return usage()
+}
+
+fn run_list(target Str) int {
+    let L = load_file(target.clone())
+    if (L.kind == 2) {
+        return fail(4, "cannot read phrase file")
+    }
+    if (L.kind == 1) {
+        return 0
+    }
+    let diags = List<Diag>.new()
+    let snap = parse_source(L.content, diags)
+    if (snap.ok == 0) {
+        return report_diag(diags)
+    }
+    return print_entries(snap.entries)
+}
+
+fn run_add_cmd(target Str, dir Str) int {
+    let fc = flag("--code")
+    is fc {
+        Some(code) -> {
+            let ft = flag("--text")
+            is ft {
+                Some(text) -> {
+                    if (valid_code(code.clone()) == false) {
+                        return fail(2, "--code must be 1..64 lowercase ASCII letters")
+                    }
+                    if (valid_text(text.clone()) == false) {
+                        return fail(2, "--text must be 1..=1024 scalars without TAB/CR/LF/NUL")
+                    }
+                    let ws = flag_weight()
+                    let pw = parse_weight(ws)
+                    is pw {
+                        Some(w) -> { return run_add(target, dir, code, text, w) }
+                        None -> { return fail(2, "--weight must be an integer in 1..=1000000") }
+                    }
+                }
+                None -> { return usage() }
+            }
+        }
+        None -> { return usage() }
+    }
+}
+
+fn flag_weight() Str {
+    let fw = flag("--weight")
+    is fw {
+        Some(w) -> {
+            if (w.len() > 0) {
+                return w
+            }
+        }
+        None -> {}
+    }
+    return "100"
+}
+
+fn run_remove_cmd(target Str, dir Str) int {
+    let fc = flag("--code")
+    is fc {
+        Some(code) -> {
+            let ft = flag("--text")
+            is ft {
+                Some(text) -> {
+                    if (valid_code(code.clone()) == false) {
+                        return fail(2, "--code must be 1..64 lowercase ASCII letters")
+                    }
+                    if (valid_text(text.clone()) == false) {
+                        return fail(2, "--text must be 1..=1024 scalars without TAB/CR/LF/NUL")
+                    }
+                    return run_remove(target, dir, code, text)
+                }
+                None -> { return usage() }
+            }
+        }
+        None -> { return usage() }
+    }
+}
+
+fn run_import_cmd(target Str, dir Str) int {
+    let ff = flag("--file")
+    is ff {
+        Some(f) -> {
+            if (f.len() == 0) {
+                return usage()
+            }
+            return run_import(target, dir, f)
+        }
+        None -> { return usage() }
+    }
+}
+
+fn run_export_cmd(target Str) int {
+    let ff = flag("--file")
+    is ff {
+        Some(f) -> {
+            if (f.len() == 0) {
+                return usage()
+            }
+            return run_export(target, f)
+        }
+        None -> { return usage() }
+    }
+}
+
+fn deploy_exe() Str {
+    let e = get("AUTOIME_DEPLOY_EXE")
+    if (e.len() > 0) {
+        return e
+    }
+    let install = get("AUTOIME_INSTALL_DIR")
+    if (install.len() == 0) {
+        return ""
+    }
+    return join(install, "autoime_deploy.exe")
+}
+
+fn run_deploy() int {
+    let exe = deploy_exe()
+    if (exists(exe.clone()) == false) {
+        return fail(4, "deploy tool not found (set AUTOIME_DEPLOY_EXE)")
+    }
+    // R-01 repair: deploy the directory the user asked for (the native tool
+    // would otherwise resolve its own default).
+    let dir = user_dir()
+    if (dir.len() == 0) {
+        return fail(4, "no user data directory (LOCALAPPDATA unset); pass --user-data-dir")
+    }
+    let code = spawn5(exe, "--user-data-dir", dir.clone(), "", "", 180000)
+    if (code == 0) {
+        return 0
+    }
+    return fail(6, "deploy failed with status " + from_int(code))
+}

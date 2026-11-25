@@ -1,0 +1,25 @@
+# Rime dependency schema - AutoIME personal English terms (PLAN-078 T-05).
+# encoding: utf-8
+#
+# Follows autoime_en.schema.yaml: it exists so the deployer compiles
+# autoime_user_terms.dict.yaml, and is never shown in the schema switcher. The
+# main schema mounts the compiled table with table_translator@autoime_user_terms
+# (exact codes only, so a short prefix never recalls a personal term).
+schema:
+  schema_id: autoime_user_terms
+  name: AutoIME 个人英文术语（依赖）
+  version: "0.1.0"
+  author:
+    - AutoIME
+  description: |
+    个人英文术语表的部署入口（不作为可选方案展示）。
+
+engine:
+  translators:
+    - table_translator
+
+translator:
+  dictionary: autoime_user_terms
+  enable_completion: false
+  enable_sentence: false
+  enable_user_dict: false

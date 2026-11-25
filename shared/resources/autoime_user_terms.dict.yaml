@@ -1,0 +1,29 @@
+# Rime table dictionary - AutoIME personal English terms (PLAN-078 T-05).
+# encoding: utf-8
+#
+# PERSONAL layer. The installer ships this empty template; `autoime-config
+# terms` owns it from then on and deployment never overwrites a user-edited
+# copy (same rule as custom_phrase.txt). One entry per line:
+#
+#   <commit text><TAB><trigger code><TAB><weight>
+#
+# Trigger codes are 2..32 ASCII letters and are matched CHARACTER BY CHARACTER,
+# including case ("AS" and "as" are different triggers). The commit text keeps
+# its own case and spaces. Multiple texts may share one code; the list order is
+# by weight. Built-in terms live in autoime_en.dict.yaml (read-only) and are
+# listed separately by the manager; a personal entry with the same code ranks
+# first so it can override a built-in trigger.
+# The last row is the shipped PLACEHOLDER (code of 32 z, text AutoIME, weight 1):
+# librime cannot compile a table with zero entries, so an otherwise empty table
+# needs one inert row. `autoime-config terms` hides it from list/export, refuses
+# to add or remove it, and re-emits it when you remove your last personal term.
+---
+name: autoime_user_terms
+version: "0.1.0"
+sort: by_weight
+columns:
+  - text
+  - code
+  - weight
+...
+AutoIME	zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz	1

@@ -1,0 +1,34 @@
+# Rime dependency schema - AutoIME shared natural-pinyin word corrections.
+# encoding: utf-8
+#
+# PLAN-073: makes autoime_words.dict.yaml deployable. Like autoime_terms, the
+# compiled .prism.bin is built from THIS schema's speller algebra, so the
+# abbreviation algebra must match the main schema or pure-initial input would
+# not reach these words (see autoime_terms.schema.yaml).
+schema:
+  schema_id: autoime_words
+  name: AutoIME 常用词（依赖）
+  version: "0.1.0"
+  author:
+    - AutoIME
+  description: |
+    AutoIME 共享自然拼音常用词修正词表的部署入口（不作为可选方案展示）。
+
+speller:
+  alphabet: zyxwvutsrqponmlkjihgfedcba
+  delimiter: " '"
+  max_code_length: 32
+  algebra:
+    __patch:
+      - pinyin:/abbreviation
+      - pinyin:/spelling_correction
+      - pinyin:/key_correction
+
+engine:
+  translators:
+    - script_translator
+
+translator:
+  dictionary: autoime_words
+  enable_user_dict: false
+  enable_sentence: false
